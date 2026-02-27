@@ -12,6 +12,8 @@ import {
   Clock,
   ArrowRight,
   Filter,
+  X,
+  FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +33,113 @@ import {
 } from "@/components/ui/tooltip";
 import { clients, communications, teamMembers } from "@/lib/data";
 import type { Client, Communication } from "@/lib/data";
+
+// ---------------------------------------------------------------------------
+// Document vault mock data
+// ---------------------------------------------------------------------------
+
+type DocExt = "pdf" | "xlsx" | "csv" | "docx" | "zip";
+type DocSource = "Client" | "IRS" | "State" | "Internal";
+
+type ClientDocument = {
+  id: string;
+  name: string;
+  category: string;
+  ext: DocExt;
+  date: string;
+  size: string;
+  source: DocSource;
+};
+
+const extConfig: Record<DocExt, { label: string; className: string }> = {
+  pdf:  { label: "PDF",  className: "bg-red-50 text-red-700 border-red-200" },
+  xlsx: { label: "XLSX", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  csv:  { label: "CSV",  className: "bg-teal-50 text-teal-700 border-teal-200" },
+  docx: { label: "DOCX", className: "bg-blue-50 text-blue-700 border-blue-200" },
+  zip:  { label: "ZIP",  className: "bg-slate-100 text-slate-600 border-slate-200" },
+};
+
+const sourceConfig: Record<DocSource, { className: string }> = {
+  Client:   { className: "bg-violet-50 text-violet-700 border-violet-200" },
+  IRS:      { className: "bg-red-50 text-red-700 border-red-200" },
+  State:    { className: "bg-amber-50 text-amber-700 border-amber-200" },
+  Internal: { className: "bg-slate-100 text-slate-600 border-slate-200" },
+};
+
+const clientDocuments: Record<string, ClientDocument[]> = {
+  oes: [
+    { id: "d1",  name: "W-2 Forms (Corrected) — 2025",        category: "Tax Returns",     ext: "pdf",  date: "2026-02-19", size: "312 KB",  source: "Client" },
+    { id: "d2",  name: "Q4 2025 Sales Tax Report",             category: "Tax Returns",     ext: "xlsx", date: "2026-02-10", size: "84 KB",   source: "Client" },
+    { id: "d3",  name: "Bank Statement — January 2026",        category: "Bank Statements", ext: "pdf",  date: "2026-02-05", size: "1.2 MB",  source: "Client" },
+    { id: "d4",  name: "CC Statement — January 2026",          category: "Bank Statements", ext: "pdf",  date: "2026-02-05", size: "890 KB",  source: "Client" },
+    { id: "d5",  name: "1120-S Return — 2024",                 category: "Tax Returns",     ext: "pdf",  date: "2025-03-15", size: "1.8 MB",  source: "Internal" },
+    { id: "d6",  name: "AP Invoice Summary — January",         category: "Invoices & AP",   ext: "xlsx", date: "2026-02-12", size: "56 KB",   source: "Client" },
+  ],
+  jd: [
+    { id: "d7",  name: "Board Meeting Agenda — Feb 2026",      category: "Board Meetings",  ext: "docx", date: "2026-02-17", size: "42 KB",   source: "Internal" },
+    { id: "d8",  name: "Bank Statement — January 2026",        category: "Bank Statements", ext: "pdf",  date: "2026-02-04", size: "760 KB",  source: "Client" },
+    { id: "d9",  name: "Property Expense Report — Q4",         category: "Financial Reports", ext: "xlsx", date: "2026-01-28", size: "118 KB", source: "Client" },
+    { id: "d10", name: "1065 Partnership Return — 2024",       category: "Tax Returns",     ext: "pdf",  date: "2025-03-12", size: "2.1 MB",  source: "Internal" },
+    { id: "d11", name: "Mortgage Statements — Jan 2026",       category: "Bank Statements", ext: "pdf",  date: "2026-02-08", size: "430 KB",  source: "Client" },
+  ],
+  wwb: [
+    { id: "d12", name: "IRS Notice CP2000 — 2024",             category: "IRS Notices",     ext: "pdf",  date: "2026-02-14", size: "520 KB",  source: "IRS" },
+    { id: "d13", name: "Payroll Register — February 2026",     category: "Payroll",         ext: "xlsx", date: "2026-02-14", size: "96 KB",   source: "Client" },
+    { id: "d14", name: "Sales Report — January 2026",          category: "Financial Reports", ext: "csv", date: "2026-02-03", size: "68 KB",  source: "Client" },
+    { id: "d15", name: "Bank Statement — January 2026",        category: "Bank Statements", ext: "pdf",  date: "2026-02-05", size: "940 KB",  source: "Client" },
+    { id: "d16", name: "1065 Partnership Return — 2024",       category: "Tax Returns",     ext: "pdf",  date: "2025-03-14", size: "1.6 MB",  source: "Internal" },
+  ],
+  monda: [
+    { id: "d17", name: "Financial Statements — January 2026",  category: "Financial Reports", ext: "pdf", date: "2026-02-20", size: "410 KB", source: "Internal" },
+    { id: "d18", name: "Board Resolutions — Q4 2025",          category: "Board Meetings",  ext: "docx", date: "2026-01-15", size: "58 KB",   source: "Client" },
+    { id: "d19", name: "Employee Stock Options Report",         category: "Payroll",         ext: "xlsx", date: "2026-01-20", size: "124 KB",  source: "Client" },
+    { id: "d20", name: "Bank Statement — January 2026",        category: "Bank Statements", ext: "pdf",  date: "2026-02-04", size: "1.1 MB",  source: "Client" },
+    { id: "d21", name: "1120 Corporate Return — 2024",         category: "Tax Returns",     ext: "pdf",  date: "2025-04-10", size: "2.4 MB",  source: "Internal" },
+    { id: "d22", name: "R&D Tax Credit Summary",               category: "Tax Returns",     ext: "xlsx", date: "2025-04-05", size: "72 KB",   source: "Internal" },
+  ],
+  "green-team": [
+    { id: "d23", name: "Q4 2025 Sales Tax Records",            category: "Tax Returns",     ext: "xlsx", date: "2026-02-18", size: "88 KB",   source: "Client" },
+    { id: "d24", name: "Job Cost Report — January 2026",       category: "Financial Reports", ext: "xlsx", date: "2026-02-10", size: "148 KB", source: "Client" },
+    { id: "d25", name: "Subcontractor 1099s — 2025",           category: "Tax Returns",     ext: "pdf",  date: "2026-01-30", size: "280 KB",  source: "Internal" },
+    { id: "d26", name: "Bank Statement — January 2026",        category: "Bank Statements", ext: "pdf",  date: "2026-02-05", size: "820 KB",  source: "Client" },
+    { id: "d27", name: "Insurance Certificates — 2026",        category: "Contracts",       ext: "pdf",  date: "2026-01-10", size: "190 KB",  source: "Client" },
+    { id: "d28", name: "AIA Billing Schedule — February",      category: "Invoices & AP",   ext: "pdf",  date: "2026-02-12", size: "62 KB",   source: "Client" },
+  ],
+  "the-experience": [
+    { id: "d29", name: "Artist Payroll — February 2026",       category: "Payroll",         ext: "xlsx", date: "2026-02-14", size: "76 KB",   source: "Client" },
+    { id: "d30", name: "Venue Revenue Report — January",       category: "Financial Reports", ext: "csv", date: "2026-02-05", size: "52 KB",  source: "Client" },
+    { id: "d31", name: "Bank Statement — January 2026",        category: "Bank Statements", ext: "pdf",  date: "2026-02-04", size: "1.0 MB",  source: "Client" },
+    { id: "d32", name: "Invoice #4521 (Disputed)",             category: "Invoices & AP",   ext: "pdf",  date: "2026-02-01", size: "38 KB",   source: "Internal" },
+    { id: "d33", name: "Q4 2025 Sales Tax Summary",            category: "Tax Returns",     ext: "xlsx", date: "2026-01-22", size: "64 KB",   source: "Client" },
+  ],
+  obi: [
+    { id: "d34", name: "Inventory Count Sheet — February",     category: "Financial Reports", ext: "xlsx", date: "2026-02-15", size: "204 KB", source: "Client" },
+    { id: "d35", name: "POS Sales Report — January 2026",      category: "Financial Reports", ext: "csv", date: "2026-02-03", size: "310 KB", source: "Client" },
+    { id: "d36", name: "Bank Statement — January 2026",        category: "Bank Statements", ext: "pdf",  date: "2026-02-04", size: "870 KB",  source: "Client" },
+    { id: "d37", name: "AP Invoices — February 2026",          category: "Invoices & AP",   ext: "pdf",  date: "2026-02-10", size: "1.4 MB",  source: "Client" },
+    { id: "d38", name: "Q4 2025 Sales Tax Summary",            category: "Tax Returns",     ext: "xlsx", date: "2026-01-20", size: "90 KB",   source: "Client" },
+  ],
+  devocion: [
+    { id: "d39", name: "P&L Statement — January 2026",         category: "Financial Reports", ext: "pdf", date: "2026-02-20", size: "310 KB", source: "Internal" },
+    { id: "d40", name: "Cost of Goods Report — January",       category: "Financial Reports", ext: "xlsx", date: "2026-02-08", size: "82 KB", source: "Client" },
+    { id: "d41", name: "Bank Statement — January 2026",        category: "Bank Statements", ext: "pdf",  date: "2026-02-05", size: "540 KB",  source: "Client" },
+    { id: "d42", name: "2024 Tax Return (1065)",               category: "Tax Returns",     ext: "pdf",  date: "2025-04-14", size: "1.3 MB",  source: "Internal" },
+  ],
+  elan: [
+    { id: "d43", name: "Employee Roster — February 2026",      category: "Payroll",         ext: "xlsx", date: "2026-02-13", size: "44 KB",   source: "Client" },
+    { id: "d44", name: "Payroll Records — January 2026",       category: "Payroll",         ext: "xlsx", date: "2026-01-31", size: "60 KB",   source: "Client" },
+    { id: "d45", name: "Bank Statement — January 2026",        category: "Bank Statements", ext: "pdf",  date: "2026-02-04", size: "620 KB",  source: "Client" },
+    { id: "d46", name: "Q4 2025 Sales Tax Records",            category: "Tax Returns",     ext: "xlsx", date: "2026-01-18", size: "50 KB",   source: "Client" },
+    { id: "d47", name: "AP Invoices — January 2026",           category: "Invoices & AP",   ext: "pdf",  date: "2026-01-28", size: "280 KB",  source: "Client" },
+  ],
+  amaracon: [
+    { id: "d48", name: "Audit Prep Document Package",          category: "Audit",           ext: "zip",  date: "2026-02-15", size: "18.4 MB", source: "Client" },
+    { id: "d49", name: "Financial Statements — January 2026",  category: "Financial Reports", ext: "pdf", date: "2026-02-18", size: "480 KB", source: "Internal" },
+    { id: "d50", name: "Bank Statement — January 2026",        category: "Bank Statements", ext: "pdf",  date: "2026-02-04", size: "1.3 MB",  source: "Client" },
+    { id: "d51", name: "Client Invoices — Q4 2025",            category: "Invoices & AP",   ext: "xlsx", date: "2026-01-15", size: "120 KB",  source: "Client" },
+    { id: "d52", name: "1120 Corporate Return — 2024",         category: "Tax Returns",     ext: "pdf",  date: "2025-04-10", size: "2.8 MB",  source: "Internal" },
+  ],
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -135,7 +244,152 @@ function HealthScoreRing({ score }: { score: number }) {
   );
 }
 
-function ClientCard({ client }: { client: Client }) {
+function ClientDocumentsDrawer({
+  client,
+  onClose,
+}: {
+  client: Client;
+  onClose: () => void;
+}) {
+  const [docSearch, setDocSearch] = useState("");
+  const docs = clientDocuments[client.id] ?? [];
+
+  const filtered = docSearch.trim()
+    ? docs.filter(
+        (d) =>
+          d.name.toLowerCase().includes(docSearch.toLowerCase()) ||
+          d.category.toLowerCase().includes(docSearch.toLowerCase())
+      )
+    : docs;
+
+  // Group by category, preserving insertion order
+  const grouped = filtered.reduce<Record<string, ClientDocument[]>>((acc, doc) => {
+    if (!acc[doc.category]) acc[doc.category] = [];
+    acc[doc.category].push(doc);
+    return acc;
+  }, {});
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-[100] bg-black/30 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+
+      {/* Drawer */}
+      <div className="fixed right-0 top-0 z-[101] flex h-full w-[440px] flex-col bg-background shadow-2xl border-l border-border">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-border/60 px-6 py-5">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-base font-semibold">{client.name}</h2>
+              <Badge variant="secondary" className="text-[11px]">
+                {client.entityType}
+              </Badge>
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {docs.length} document{docs.length !== 1 ? "s" : ""}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            className="cursor-pointer text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-4" />
+          </Button>
+        </div>
+
+        {/* Search */}
+        <div className="border-b border-border/60 px-6 py-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search documents..."
+              value={docSearch}
+              onChange={(e) => setDocSearch(e.target.value)}
+              className="h-8 pl-8 text-sm"
+            />
+          </div>
+        </div>
+
+        {/* Document list */}
+        <div className="flex-1 overflow-y-auto">
+          {Object.keys(grouped).length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+              <FolderOpen className="size-8 text-muted-foreground/40" />
+              <p className="text-sm text-muted-foreground">No documents found</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border/60">
+              {Object.entries(grouped).map(([category, categoryDocs]) => (
+                <div key={category}>
+                  {/* Category header */}
+                  <div className="flex items-center gap-2 bg-muted/30 px-6 py-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {category}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground/50">
+                      {categoryDocs.length}
+                    </span>
+                  </div>
+                  {/* Documents */}
+                  <div className="divide-y divide-border/40">
+                    {categoryDocs.map((doc) => {
+                      const ext = extConfig[doc.ext];
+                      const src = sourceConfig[doc.source];
+                      return (
+                        <div
+                          key={doc.id}
+                          className="flex cursor-pointer items-start gap-3 px-6 py-3 transition-colors hover:bg-muted/30"
+                        >
+                          <Badge
+                            variant="outline"
+                            className={`mt-0.5 shrink-0 px-1.5 font-mono text-[10px] font-normal ${ext.className}`}
+                          >
+                            {ext.label}
+                          </Badge>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium leading-snug">
+                              {doc.name}
+                            </p>
+                            <div className="mt-1 flex items-center gap-1.5">
+                              <span className="text-[11px] text-muted-foreground">
+                                {new Date(doc.date).toLocaleDateString("en-US", {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                })}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground/40">·</span>
+                              <span className="text-[11px] text-muted-foreground">
+                                {doc.size}
+                              </span>
+                            </div>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={`shrink-0 text-[10px] font-normal ${src.className}`}
+                          >
+                            {doc.source}
+                          </Badge>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ClientCard({ client, onClick }: { client: Client; onClick: () => void }) {
   const ContactIcon = contactTypeIcon[client.lastContactType];
   const maxVisible = 3;
   const visibleMembers = client.assignedTo.slice(0, maxVisible);
@@ -145,7 +399,7 @@ function ClientCard({ client }: { client: Client }) {
   const moreServices = client.services.length - maxServices;
 
   return (
-    <Card className="group relative cursor-pointer transition-shadow duration-200 hover:shadow-md">
+    <Card className="group relative cursor-pointer transition-shadow duration-200 hover:shadow-md" onClick={onClick}>
       {/* Status dot */}
       <div className="absolute top-5 right-5">
         <Tooltip>
@@ -436,9 +690,8 @@ function AtRiskCard({ client }: { client: Client }) {
 
 export default function ClientsPage() {
   const [search, setSearch] = useState("");
-  const [commFilter, setCommFilter] = useState<
-    "all" | "email" | "call" | "text"
-  >("all");
+  const [commFilter, setCommFilter] = useState<"all" | "email" | "call" | "text">("all");
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
   // Filter clients by search
   const filteredClients = useMemo(() => {
@@ -509,61 +762,76 @@ export default function ClientsPage() {
         <TabsList variant="line" className="gap-2">
           <TabsTrigger value="all-clients" className="cursor-pointer">
             All Clients
-            <Badge
-              variant="secondary"
-              className="ml-1 text-[10px] px-1.5 py-0"
-            >
+            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
               {clients.length}
             </Badge>
           </TabsTrigger>
           <TabsTrigger value="communications" className="cursor-pointer">
             Communications
-            <Badge
-              variant="secondary"
-              className="ml-1 text-[10px] px-1.5 py-0"
-            >
+            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
               {communications.filter((c) => !c.read).length}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="at-risk" className="cursor-pointer">
-            At Risk
-            <Badge
-              variant="secondary"
-              className="ml-1 text-[10px] px-1.5 py-0"
-            >
-              {atRiskClients.length}
             </Badge>
           </TabsTrigger>
         </TabsList>
 
         {/* ----- All Clients Tab ----- */}
-        <TabsContent value="all-clients" className="mt-6 flex flex-col gap-6">
-          {/* Search */}
-          <div className="relative max-w-sm">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <Input
-              placeholder="Search clients..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 bg-white"
-            />
-          </div>
+        <TabsContent value="all-clients" className="mt-6 flex flex-col gap-8">
 
-          {/* Client Grid */}
-          {filteredClients.length > 0 ? (
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {filteredClients.map((client) => (
-                <ClientCard key={client.id} client={client} />
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-              <Search className="h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">
-                No clients match &ldquo;{search}&rdquo;
-              </p>
+          {/* Needs Attention section */}
+          {atRiskClients.length > 0 && (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <h2 className="text-sm font-semibold text-amber-800">
+                    Needs Attention
+                  </h2>
+                </div>
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                  {atRiskClients.length}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                {atRiskClients.map((client) => (
+                  <AtRiskCard key={client.id} client={client} />
+                ))}
+              </div>
+              <div className="border-t border-border/60" />
             </div>
           )}
+
+          {/* Search */}
+          <div className="flex flex-col gap-5">
+            <div className="relative max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Search clients..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9 bg-white"
+              />
+            </div>
+
+            {/* Client Grid */}
+            {filteredClients.length > 0 ? (
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+                {filteredClients.map((client) => (
+                  <ClientCard
+                    key={client.id}
+                    client={client}
+                    onClick={() => setSelectedClient(client)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+                <Search className="h-8 w-8 text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">
+                  No clients match &ldquo;{search}&rdquo;
+                </p>
+              </div>
+            )}
+          </div>
         </TabsContent>
 
         {/* ----- Communications Tab ----- */}
@@ -602,23 +870,14 @@ export default function ClientsPage() {
           </Card>
         </TabsContent>
 
-        {/* ----- At Risk Tab ----- */}
-        <TabsContent value="at-risk" className="mt-6 flex flex-col gap-5">
-          <div className="flex items-center gap-2 rounded-lg border border-amber-200/70 bg-amber-50/30 px-4 py-3">
-            <AlertTriangle className="h-4 w-4 text-amber-600" />
-            <p className="text-sm text-amber-800">
-              <span className="font-medium">{atRiskClients.length} clients</span>{" "}
-              require attention &mdash; health score below 85 or flagged at-risk
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            {atRiskClients.map((client) => (
-              <AtRiskCard key={client.id} client={client} />
-            ))}
-          </div>
-        </TabsContent>
       </Tabs>
+
+      {selectedClient && (
+        <ClientDocumentsDrawer
+          client={selectedClient}
+          onClose={() => setSelectedClient(null)}
+        />
+      )}
     </div>
   );
 }

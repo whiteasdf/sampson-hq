@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Hubballi, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { TopNav } from "@/components/top-nav";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const hubballi = Hubballi({
+  variable: "--font-hubballi",
+  weight: "400",
   subsets: ["latin"],
 });
 
@@ -27,12 +27,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${hubballi.variable} ${geistMono.variable} antialiased`}
       >
-        <TooltipProvider>
-          <TopNav />
-          <main className="mx-auto max-w-[1440px] px-6 py-6">{children}</main>
-        </TooltipProvider>
+        <TooltipProvider>{children}</TooltipProvider>
       </body>
     </html>
   );

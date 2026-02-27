@@ -4,39 +4,56 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  CheckSquare,
   Users,
-  Wrench,
-  Search,
-  Bell,
-  Mic,
+  CheckSquare,
+  LogOut,
 } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/tasks", label: "Tasks & Time", icon: CheckSquare },
-  { href: "/clients", label: "Clients", icon: Users },
-  { href: "/tools", label: "Tools & Guides", icon: Wrench },
+  { href: "/clients", label: "Accounts", icon: Users },
+  { href: "/tasks", label: "Tasks", icon: CheckSquare },
 ];
 
 export function TopNav() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/80 backdrop-blur-xl">
+    <header
+      className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-xl"
+      style={{ borderBottomColor: "rgba(195,151,73,0.25)" }}
+    >
       <div className="mx-auto flex h-16 max-w-[1440px] items-center gap-6 px-6">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold">
-            S
+          <div
+            className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0"
+            style={{ backgroundColor: "#1B3D21" }}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="h-5 w-5"
+              fill="#C39749"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path d="M12 2 L13.53 8.3 L17.66 6.34 L15.7 10.47 L22 12 L15.7 13.53 L17.66 17.66 L13.53 15.7 L12 22 L10.47 15.7 L6.34 17.66 L8.3 13.53 L2 12 L8.3 10.47 L6.34 6.34 L10.47 8.3 Z" />
+            </svg>
           </div>
-          <span className="text-[15px] font-semibold tracking-tight">
-            Sampson HQ
+          <span
+            className="text-[16px] tracking-tight"
+            style={{ fontFamily: '"Big Caslon", "Book Antiqua", "Palatino Linotype", Georgia, serif', fontWeight: 600 }}
+          >
+            Sampson
           </span>
         </Link>
 
@@ -68,40 +85,29 @@ export function TopNav() {
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Search + Voice */}
-        <div className="relative flex items-center max-w-xs w-full">
-          <Search className="absolute left-3 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search clients, tasks..."
-            className="pl-9 pr-10 h-9 text-sm bg-muted/50 border-transparent focus:border-border focus:bg-background"
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute right-1 h-7 w-7 text-muted-foreground hover:text-foreground cursor-pointer"
-          >
-            <Mic className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-
-        {/* Notifications */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative h-9 w-9 text-muted-foreground hover:text-foreground cursor-pointer"
-        >
-          <Bell className="h-4 w-4" />
-          <Badge className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-1 text-[10px] bg-destructive text-white border-2 border-background">
-            3
-          </Badge>
-        </Button>
-
-        {/* User */}
-        <Avatar className="h-8 w-8 cursor-pointer">
-          <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-            DH
-          </AvatarFallback>
-        </Avatar>
+        {/* User menu */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Avatar className="h-8 w-8">
+                <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                  DH
+                </AvatarFallback>
+              </Avatar>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuLabel className="font-normal">
+              <p className="text-sm font-semibold">D. Humphrey</p>
+              <p className="text-xs text-muted-foreground">Partner</p>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer">
+              <LogOut className="mr-2 h-4 w-4" />
+              Log out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );
