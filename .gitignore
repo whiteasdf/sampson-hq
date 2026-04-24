@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# docs containing API secrets (credentials in examples)
+ACCELO_API_FINDINGS.md
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

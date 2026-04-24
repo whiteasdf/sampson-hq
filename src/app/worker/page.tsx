@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { tasks, teamMembers, clients, serviceCategories, clientDocuments } from "@/lib/data";
-import type { Task, ClientDocument } from "@/lib/data";
+import type { Task } from "@/lib/data";
+import { serviceCategories, clientDocuments } from "@/lib/data";
+import type { ClientDocument } from "@/lib/data";
+import { supabaseBrowser } from "@/lib/supabase-browser";
+import { getWorkerTasks, getStaffNames, getCompanyNames } from "@/lib/queries/tasks";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -24,21 +27,7 @@ import {
   FileText, FileSpreadsheet, FileType, ExternalLink, FolderOpen,
 } from "lucide-react";
 
-// ── Data ──────────────────────────────────────────────────────────────────────
-
-const EXTRA_TASKS: Task[] = [
-  { id: "t13", title: "Bank Rec — January",  client: "OES",   assignee: "Gio",    category: "Bank & CC Rec's", priority: "medium", status: "todo", dueDate: "2026-02-27", estimatedHours: 3, loggedHours: 0, recurring: true  },
-  { id: "t14", title: "Q4 Sales Tax",         client: "Elan",  assignee: "Gio",    category: "Sales Tax",       priority: "low",    status: "todo", dueDate: "2026-03-10", estimatedHours: 2, loggedHours: 0, recurring: false },
-  { id: "t15", title: "AP Review — February", client: "Monda", assignee: "Faizan", category: "AP & AR",         priority: "medium", status: "todo", dueDate: "2026-02-26", estimatedHours: 2, loggedHours: 0, recurring: true  },
-  { id: "t16", title: "Monthly Close",        client: "OBI",   assignee: "Mitch",  category: "Bookkeeping",     priority: "high",   status: "todo", dueDate: "2026-02-25", estimatedHours: 5, loggedHours: 1, recurring: true  },
-  { id: "t17", title: "Payroll — March 1",    client: "WWB",   assignee: "Jordea", category: "Payroll",         priority: "high",   status: "todo", dueDate: "2026-02-28", estimatedHours: 3, loggedHours: 0, recurring: true  },
-];
-
-const SEED_TASKS: Task[] = [...tasks, ...EXTRA_TASKS];
-const WORKERS = teamMembers.map((m) => m.name);
-
-// Tasks that are blocked waiting on client (hardcoded for mock)
-const WAITING_IDS = new Set(["t3", "t5"]);
+// Data is loaded from Supabase at runtime via useEffect.
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -119,6 +108,7 @@ const statusDot: Record<Task["status"], string> = {
   "todo":        "bg-slate-400",
   "in-progress": "bg-blue-500",
   "review":      "bg-violet-500",
+  "waiting":     "bg-amber-400",
   "done":        "bg-emerald-500",
 };
 
@@ -128,6 +118,7 @@ const statusConfig: Record<Task["status"], { label: string; className: string; i
   "todo":        { label: "To Do",       className: "bg-slate-100 text-slate-600 border-slate-200",      icon: Clock        },
   "in-progress": { label: "In Progress", className: "bg-blue-50 text-blue-700 border-blue-200",          icon: RefreshCw    },
   "review":      { label: "In Review",   className: "bg-violet-50 text-violet-700 border-violet-200",    icon: Eye          },
+  "waiting":     { label: "Waiting",     className: "bg-amber-50 text-amber-700 border-amber-200",       icon: Hourglass    },
   "done":        { label: "Done",        className: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
 };
 
@@ -193,9 +184,18 @@ function formatDate(iso: string) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function WorkerPage() {
-  const [taskList, setTaskList]             = useState<Task[]>(SEED_TASKS);
-  const [selectedWorker, setSelectedWorker] = useState("Gio");
+  const [taskList, setTaskList]             = useState<Task[]>([]);
+  const [workers, setWorkers]               = useState<string[]>([]);
+  const [selectedWorker, setSelectedWorker] = useState("");
   const [greeting, setGreeting]             = useState("");
+
+  useEffect(() => {
+    getWorkerTasks(supabaseBrowser).then(setTaskList).catch(console.error);
+    getStaffNames(supabaseBrowser).then((names) => {
+      setWorkers(names);
+      if (names.length > 0) setSelectedWorker(names[0]);
+    }).catch(console.error);
+  }, []);
 
   // Timer
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -267,10 +267,10 @@ export default function WorkerPage() {
 
   // ── Accounts helpers ───────────────────────────────────────────────────────
 
-  function changeStatus(taskId: string, status: Task["status"]) {
+  async function changeStatus(taskId: string, status: Task["status"]) {
     setTaskList((p) => p.map((t) => t.id === taskId ? { ...t, status } : t));
   }
-  function reassign(taskId: string, assignee: string) {
+  async function reassign(taskId: string, assignee: string) {
     setTaskList((p) => p.map((t) => t.id === taskId ? { ...t, assignee } : t));
   }
   function changePriorityAcc(taskId: string, priority: Task["priority"]) {
@@ -296,22 +296,27 @@ export default function WorkerPage() {
   const workerActiveTasks = useMemo(
     () =>
       taskList
-        .filter((t) => t.assignee === selectedWorker && t.status !== "done" && !WAITING_IDS.has(t.id))
+        .filter((t) => t.assignee === selectedWorker && t.status !== "done" && t.status !== "waiting")
         .sort((a, b) => taskSortScore(a) - taskSortScore(b)),
     [taskList, selectedWorker]
   );
 
   const workerWaitingTasks = useMemo(
-    () => taskList.filter((t) => t.assignee === selectedWorker && WAITING_IDS.has(t.id)),
+    () => taskList.filter((t) => t.assignee === selectedWorker && t.status === "waiting"),
     [taskList, selectedWorker]
   );
 
   const activeTask = activeTaskId ? taskList.find((t) => t.id === activeTaskId) ?? null : null;
 
-  const myClients = useMemo(
-    () => clients.filter((c) => c.assignedTo.includes(selectedWorker)),
-    [selectedWorker]
-  );
+  const myClients = useMemo(() => {
+    const clientMap = new Map<string, { id: string; name: string; status: string }>();
+    for (const t of taskList) {
+      if (t.assignee === selectedWorker && t.client && !clientMap.has(t.client)) {
+        clientMap.set(t.client, { id: t.client.toLowerCase().replace(/\s+/g, "-"), name: t.client, status: "active" });
+      }
+    }
+    return [...clientMap.values()];
+  }, [taskList, selectedWorker]);
 
   return (
     <>
@@ -337,7 +342,7 @@ export default function WorkerPage() {
             onChange={(e) => { if (activeTaskId) stopTask(); setSelectedWorker(e.target.value); }}
             className="cursor-pointer appearance-none bg-transparent font-semibold underline decoration-dotted underline-offset-4 hover:decoration-solid focus:outline-none"
           >
-            {WORKERS.map((w) => <option key={w} value={w}>{w}</option>)}
+            {workers.map((w) => <option key={w} value={w}>{w}</option>)}
           </select>
         </h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
@@ -385,7 +390,7 @@ export default function WorkerPage() {
                       <span className="text-sm font-semibold flex-1">{client.name}</span>
                       {client.status === "at-risk" && (
                         <Badge variant="outline" className="font-normal text-xs bg-amber-50 text-amber-700 border-amber-200 gap-1 shrink-0">
-                          <AlertCircle className="size-3" /> At Risk
+                          At Risk
                         </Badge>
                       )}
                       <span className="text-xs text-muted-foreground shrink-0 w-10 text-right">{openTasks.length} open</span>
@@ -451,7 +456,7 @@ export default function WorkerPage() {
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuLabel className="text-xs text-muted-foreground">Assign to</DropdownMenuLabel>
                                   <DropdownMenuSeparator />
-                                  {WORKERS.map((w) => (
+                                  {workers.map((w) => (
                                     <DropdownMenuItem key={w} onClick={() => reassign(t.id, w)} className={t.assignee === w ? "font-semibold" : ""}>
                                       <Avatar className="size-5 mr-2"><AvatarFallback className="text-[9px] font-semibold bg-primary/10 text-primary">{w[0]}</AvatarFallback></Avatar>
                                       {w}
@@ -642,7 +647,7 @@ export default function WorkerPage() {
                 <label className="text-sm font-medium">Assign to *</label>
                 <select value={newTask.assignee} onChange={(e) => setNewTask((p) => ({ ...p, assignee: e.target.value }))} className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer">
                   <option value="">Select staff…</option>
-                  {WORKERS.map((w) => <option key={w}>{w}</option>)}
+                  {workers.map((w) => <option key={w}>{w}</option>)}
                 </select>
               </div>
               <div className="space-y-1.5">

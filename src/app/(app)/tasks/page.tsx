@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { tasks as baseTasks, teamMembers, clients, serviceCategories, clientDocuments } from "@/lib/data";
+import { useState, useMemo, useEffect, Fragment } from "react";
+import { clientDocuments, serviceCategories } from "@/lib/data";
 import type { Task } from "@/lib/data";
+import { supabaseBrowser } from "@/lib/supabase-browser";
+import { getOpenTasks } from "@/lib/queries/tasks";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -42,24 +44,7 @@ type TaskMeta = {
   infoRequestNote?: string;
 };
 
-// ── Seed data ─────────────────────────────────────────────────────────────────
-
-const extraTasks: Task[] = [
-  { id: "t13", title: "Bank Rec — January",    client: "OES",            assignee: "Gio",    category: "Bank & CC Rec's",      priority: "medium", status: "todo",        dueDate: "2026-02-27", estimatedHours: 3,  loggedHours: 0,   recurring: true  },
-  { id: "t14", title: "Q4 Sales Tax",           client: "Elan",           assignee: "Gio",    category: "Sales Tax",            priority: "low",    status: "todo",        dueDate: "2026-03-10", estimatedHours: 2,  loggedHours: 0,   recurring: false },
-  { id: "t15", title: "AP Review — February",   client: "Monda",          assignee: "Faizan", category: "AP & AR",              priority: "medium", status: "todo",        dueDate: "2026-02-26", estimatedHours: 2,  loggedHours: 0,   recurring: true  },
-  { id: "t16", title: "Monthly Close",          client: "OBI",            assignee: "Mitch",  category: "Bookkeeping",          priority: "high",   status: "todo",        dueDate: "2026-02-25", estimatedHours: 5,  loggedHours: 1,   recurring: true  },
-  { id: "t17", title: "Payroll — March 1",      client: "WWB",            assignee: "Jordea", category: "Payroll",              priority: "high",   status: "todo",        dueDate: "2026-02-28", estimatedHours: 3,  loggedHours: 0,   recurring: true  },
-  { id: "t18", title: "Tax Return 2025",        client: "JD",             assignee: "Henry",  category: "Tax Returns",          priority: "high",   status: "in-progress", dueDate: "2026-04-15", estimatedHours: 10, loggedHours: 3,   recurring: false },
-  { id: "t19", title: "Audit Prep — Q1",        client: "Amaracon",       assignee: "Sam",    category: "Audits",               priority: "medium", status: "in-progress", dueDate: "2026-03-20", estimatedHours: 8,  loggedHours: 2,   recurring: false },
-  { id: "t20", title: "Cash Flow Review",       client: "Green Team",     assignee: "Jim",    category: "Cash Flow",            priority: "medium", status: "review",      dueDate: "2026-02-28", estimatedHours: 3,  loggedHours: 2.5, recurring: true  },
-  { id: "t21", title: "Advisory Call — March",  client: "Devocion",       assignee: "Jim",    category: "Advisory",             priority: "low",    status: "todo",        dueDate: "2026-03-06", estimatedHours: 2,  loggedHours: 0,   recurring: true  },
-  { id: "t22", title: "Financial Statements",   client: "The Experience", assignee: "Musa",   category: "Financial Statements", priority: "medium", status: "todo",        dueDate: "2026-03-01", estimatedHours: 5,  loggedHours: 0,   recurring: true  },
-];
-
-const ALL_TASKS: Task[] = [...baseTasks, ...extraTasks];
-const WORKERS = teamMembers.map((m) => m.name);
-const CLIENT_NAMES = clients.map((c) => c.name);
+// Data is loaded from Supabase at runtime via useEffect.
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -67,6 +52,7 @@ const statusConfig: Record<Task["status"], { label: string; className: string; i
   "todo":        { label: "To Do",       className: "bg-slate-100 text-slate-600 border-slate-200",      icon: Clock        },
   "in-progress": { label: "In Progress", className: "bg-blue-50 text-blue-700 border-blue-200",          icon: RefreshCw    },
   "review":      { label: "In Review",   className: "bg-violet-50 text-violet-700 border-violet-200",    icon: Eye          },
+  "waiting":     { label: "Waiting",     className: "bg-amber-50 text-amber-700 border-amber-200",       icon: Clock        },
   "done":        { label: "Done",        className: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
 };
 
@@ -111,7 +97,7 @@ type SortKey = "dueDate" | "priority" | "status" | "client" | "assignee";
 type SortDir = "asc" | "desc";
 
 const priorityWeight = { high: 0, medium: 1, low: 2 } as const;
-const statusWeight   = { "in-progress": 0, "review": 1, "todo": 2, "done": 3 } as const;
+const statusWeight: Record<Task["status"], number> = { "in-progress": 0, "review": 1, "todo": 2, "waiting": 3, "done": 4 };
 
 function blankTask(): Omit<Task, "id"> {
   return { title: "", client: "", assignee: "", category: "", priority: "medium", status: "todo", dueDate: "", estimatedHours: 1, loggedHours: 0, recurring: false };
@@ -120,8 +106,17 @@ function blankTask(): Omit<Task, "id"> {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function TasksPage() {
-  const [taskList, setTaskList]   = useState<Task[]>(ALL_TASKS);
+  const [taskList, setTaskList]   = useState<Task[]>([]);
   const [taskMeta, setTaskMeta]   = useState<Record<string, TaskMeta>>({});
+
+  // Fetch tasks from Supabase; falls back to empty list on error.
+  useEffect(() => {
+    getOpenTasks(supabaseBrowser).then(setTaskList).catch(console.error);
+  }, []);
+
+  // Derive worker and client names from the loaded task list.
+  const workers     = useMemo(() => [...new Set(taskList.map((t) => t.assignee).filter(Boolean))].sort(), [taskList]);
+  const clientNames = useMemo(() => [...new Set(taskList.map((t) => t.client).filter(Boolean))].sort(), [taskList]);
 
   // Filters
   const [search, setSearch]               = useState("");
@@ -162,7 +157,12 @@ export default function TasksPage() {
 
   // Staff queue sheet
   const [queueOpen, setQueueOpen]   = useState(false);
-  const [queueWorker, setQueueWorker] = useState(WORKERS[0]);
+  const [queueWorker, setQueueWorker] = useState("");
+
+  // Auto-select first worker when task data loads
+  useEffect(() => {
+    if (!queueWorker && workers.length > 0) setQueueWorker(workers[0]);
+  }, [workers, queueWorker]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -171,12 +171,36 @@ export default function TasksPage() {
     setTaskMeta((p) => ({ ...p, [id]: { ...p[id], ...patch } }));
   }
 
-  function reassign(taskId: string, assignee: string) {
+  async function reassign(taskId: string, assignee: string) {
+    const original = taskList;
     setTaskList((p) => p.map((t) => t.id === taskId ? { ...t, assignee } : t));
     setReassignTarget(null);
+    const { data: { session } } = await supabaseBrowser.auth.getSession();
+    if (!session) return;
+    const staffRes = await supabaseBrowser.from("staff").select("accelo_id, firstname, surname");
+    const staff = (staffRes.data ?? []).find((s) => [s.firstname, s.surname].filter(Boolean).join(" ") === assignee);
+    if (!staff) return;
+    fetch(`/api/tasks/${taskId}/assignee`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ assignee_id: staff.accelo_id }),
+    }).catch(() => setTaskList(original));
   }
-  function changeStatus(taskId: string, status: Task["status"]) {
+  async function changeStatus(taskId: string, status: Task["status"]) {
+    const original = taskList;
     setTaskList((p) => p.map((t) => t.id === taskId ? { ...t, status } : t));
+    // IDs from Accelo: 2=Pending, 3=Accepted, 4=Started, 5=Complete, 6=Inactive, 7=Paused
+    // "In Review" and "Ready to Bill" statuses need to be created in Accelo admin (GAR-623)
+    const statusMap: Record<string, number> = { "todo": 2, "in-progress": 4, "review": 4, "waiting": 7, "done": 5 };
+    const statusId = statusMap[status];
+    if (!statusId) return;
+    const { data: { session } } = await supabaseBrowser.auth.getSession();
+    if (!session) return;
+    fetch(`/api/tasks/${taskId}/status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ status_id: statusId }),
+    }).catch(() => setTaskList(original));
   }
   function changePriority(taskId: string, priority: Task["priority"]) {
     setTaskList((p) => p.map((t) => t.id === taskId ? { ...t, priority } : t));
@@ -190,10 +214,18 @@ export default function TasksPage() {
     }));
   }
 
-  function confirmEscalate() {
+  async function confirmEscalate() {
     if (!escalateTask || !escalateReason) return;
-    updateMeta(escalateTask.id, { flagged: true, flagReason: escalateReason, flagNote: escalateNote, flaggedAt: "2026-02-26" });
+    updateMeta(escalateTask.id, { flagged: true, flagReason: escalateReason, flagNote: escalateNote, flaggedAt: new Date().toISOString().split("T")[0] });
+    const taskAcceloId = parseInt(escalateTask.id, 10);
     setEscalateTask(null); setEscalateReason(""); setEscalateNote("");
+    const { data: { session } } = await supabaseBrowser.auth.getSession();
+    if (!session || isNaN(taskAcceloId)) return;
+    fetch("/api/tasks/flag", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ task_accelo_id: taskAcceloId, flag_type: escalateReason, note: escalateNote || null }),
+    }).catch(console.error);
   }
   function confirmInfoRequest() {
     if (!infoTask) return;
@@ -207,10 +239,24 @@ export default function TasksPage() {
   function toggleSelectAll() {
     setSelected(selected.size === filtered.length && filtered.length > 0 ? new Set() : new Set(filtered.map((t) => t.id)));
   }
-  function applyBatchReassign() {
+  async function applyBatchReassign() {
     if (!batchAssignee) return;
     setTaskList((p) => p.map((t) => selected.has(t.id) ? { ...t, assignee: batchAssignee } : t));
+    const taskIds = [...selected];
     setSelected(new Set()); setBatchDialog(false); setBatchAssignee("");
+    const { data: { session } } = await supabaseBrowser.auth.getSession();
+    if (!session) return;
+    const staffRes = await supabaseBrowser.from("staff").select("accelo_id, firstname, surname");
+    const staff = (staffRes.data ?? []).find((s) => [s.firstname, s.surname].filter(Boolean).join(" ") === batchAssignee);
+    if (!staff) return;
+    for (const id of taskIds) {
+      fetch(`/api/tasks/${id}/assignee`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ assignee_id: staff.accelo_id }),
+      }).catch(console.error);
+      await new Promise((r) => setTimeout(r, 250));
+    }
   }
   function createTask() {
     if (!newTask.title || !newTask.client || !newTask.assignee) return;
@@ -273,7 +319,7 @@ export default function TasksPage() {
       if (filterPriority !== "all" && t.priority !== filterPriority) return false;
       return true;
     });
-    return { all: base.length, todo: base.filter((t) => t.status === "todo").length, "in-progress": base.filter((t) => t.status === "in-progress").length, review: base.filter((t) => t.status === "review").length, done: base.filter((t) => t.status === "done").length };
+    return { all: base.length, todo: base.filter((t) => t.status === "todo").length, "in-progress": base.filter((t) => t.status === "in-progress").length, review: base.filter((t) => t.status === "review").length, waiting: base.filter((t) => t.status === "waiting").length, done: base.filter((t) => t.status === "done").length };
   }, [taskList, taskMeta, showFlagged, search, filterAssignee, filterClient, filterPriority]);
 
   const flaggedCount = useMemo(() => taskList.filter((t) => taskMeta[t.id]?.flagged).length, [taskList, taskMeta]);
@@ -312,7 +358,7 @@ export default function TasksPage() {
 
       {/* Status tabs */}
       <div className="flex items-center gap-1 border-b">
-        {(["all", "todo", "in-progress", "review", "done"] as const).map((s) => (
+        {(["all", "todo", "in-progress", "review", "waiting", "done"] as const).map((s) => (
           <button
             key={s}
             onClick={() => { setFilterStatus(s); setShowFlagged(false); }}
@@ -362,7 +408,7 @@ export default function TasksPage() {
             <DropdownMenuLabel className="text-xs text-muted-foreground">Assignee</DropdownMenuLabel>
             <DropdownMenuItem onClick={() => setFilterAssignee("all")}>All Staff</DropdownMenuItem>
             <DropdownMenuSeparator />
-            {WORKERS.map((w) => <DropdownMenuItem key={w} onClick={() => setFilterAssignee(w)}>{w}</DropdownMenuItem>)}
+            {workers.map((w) => <DropdownMenuItem key={w} onClick={() => setFilterAssignee(w)}>{w}</DropdownMenuItem>)}
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -376,7 +422,7 @@ export default function TasksPage() {
             <DropdownMenuLabel className="text-xs text-muted-foreground">Client</DropdownMenuLabel>
             <DropdownMenuItem onClick={() => setFilterClient("all")}>All Clients</DropdownMenuItem>
             <DropdownMenuSeparator />
-            {CLIENT_NAMES.map((c) => <DropdownMenuItem key={c} onClick={() => setFilterClient(c)}>{c}</DropdownMenuItem>)}
+            {clientNames.map((c) => <DropdownMenuItem key={c} onClick={() => setFilterClient(c)}>{c}</DropdownMenuItem>)}
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -455,9 +501,8 @@ export default function TasksPage() {
               const taskDocs = clientDocuments.filter((d) => d.clientName === task.client);
 
               return (
-                <>
+                <Fragment key={task.id}>
                 <TableRow
-                  key={task.id}
                   className={cn("group transition-colors", tint, isSelected && "ring-1 ring-inset ring-primary/30")}
                   style={accent ? { boxShadow: `inset 3px 0 0 ${accent}`, transition: "box-shadow 150ms ease" } : undefined}
                   onMouseEnter={(e) => { if (accent) e.currentTarget.style.boxShadow = `inset 6px 0 0 ${accent}`; }}
@@ -511,7 +556,7 @@ export default function TasksPage() {
                       <DropdownMenuContent align="start">
                         <DropdownMenuLabel className="text-xs text-muted-foreground">Reassign to</DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        {WORKERS.map((w) => (
+                        {workers.map((w) => (
                           <DropdownMenuItem key={w} className={cn(w === task.assignee && "font-semibold")} onClick={() => reassign(task.id, w)}>
                             <Avatar className="size-5 mr-2"><AvatarFallback className="text-[9px] font-semibold bg-primary/10 text-primary">{w[0]}</AvatarFallback></Avatar>
                             {w}
@@ -535,7 +580,7 @@ export default function TasksPage() {
                       <DropdownMenuContent align="start">
                         <DropdownMenuLabel className="text-xs text-muted-foreground">Change status</DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        {(["todo", "in-progress", "review", "done"] as const).map((s) => {
+                        {(["todo", "in-progress", "review", "waiting", "done"] as const).map((s) => {
                           const cfg = statusConfig[s]; const Icon = cfg.icon;
                           return <DropdownMenuItem key={s} onClick={() => changeStatus(task.id, s)}><Icon className="size-3.5 mr-2" />{cfg.label}</DropdownMenuItem>;
                         })}
@@ -659,7 +704,7 @@ export default function TasksPage() {
                     </TableCell>
                   </TableRow>
                 )}
-                </>
+                </Fragment>
               );
             })}
           </TableBody>
@@ -797,7 +842,7 @@ export default function TasksPage() {
             <p className="text-sm text-muted-foreground">Choose a team member to take over the selected task{selected.size !== 1 ? "s" : ""}.</p>
             <select value={batchAssignee} onChange={(e) => setBatchAssignee(e.target.value)} className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer">
               <option value="">Select staff member…</option>
-              {WORKERS.map((w) => <option key={w}>{w}</option>)}
+              {workers.map((w) => <option key={w}>{w}</option>)}
             </select>
           </div>
           <DialogFooter>
@@ -821,14 +866,14 @@ export default function TasksPage() {
                 <label className="text-sm font-medium">Client *</label>
                 <select value={newTask.client} onChange={(e) => setNewTask((p) => ({ ...p, client: e.target.value }))} className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer">
                   <option value="">Select client…</option>
-                  {CLIENT_NAMES.map((c) => <option key={c}>{c}</option>)}
+                  {clientNames.map((c) => <option key={c}>{c}</option>)}
                 </select>
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">Assign to *</label>
                 <select value={newTask.assignee} onChange={(e) => setNewTask((p) => ({ ...p, assignee: e.target.value }))} className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer">
                   <option value="">Select staff…</option>
-                  {WORKERS.map((w) => <option key={w}>{w}</option>)}
+                  {workers.map((w) => <option key={w}>{w}</option>)}
                 </select>
               </div>
             </div>
@@ -883,7 +928,7 @@ export default function TasksPage() {
 
           {/* Worker tabs */}
           <div className="flex gap-0.5 overflow-x-auto px-4 pt-3 pb-0 border-b shrink-0">
-            {WORKERS.map((w) => {
+            {workers.map((w) => {
               const count = taskList.filter((t) => t.assignee === w && t.status !== "done").length;
               return (
                 <button

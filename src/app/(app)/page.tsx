@@ -1,7 +1,11 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { firmStats, teamMembers, clients, timeEntries } from "@/lib/data";
+import { useState, useMemo, useEffect } from "react";
+import { teamMembers as mockTeamMembers, timeEntries as mockTimeEntries } from "@/lib/data";
+import type { TeamMember } from "@/lib/data";
+// Query functions are ready — uncomment once the activity backfill has run:
+// import { supabaseBrowser } from "@/lib/supabase-browser";
+// import { getTeamCapacity, getTodayTimeLog, getFirmStats } from "@/lib/queries/dashboard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -730,6 +734,12 @@ const WEEKLY_PTO: Record<string, number> = {
 function TeamCapacityCard() {
   const [cardView, setCardView] = useState<"capacity" | "time-log">("capacity");
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // Staff and time-log data — seeded from mock until activity backfill runs.
+  // When Supabase activities are populated, swap these with getTeamCapacity()
+  // and getTodayTimeLog() from @/lib/queries/dashboard.
+  const [teamMembers] = useState<TeamMember[]>(mockTeamMembers);
+  const [timeEntries] = useState(mockTimeEntries);
 
   const taskHoursByMember = useMemo(() => {
     const map: Record<string, number> = {};

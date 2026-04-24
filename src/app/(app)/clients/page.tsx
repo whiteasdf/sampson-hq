@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   UserPlus,
   Search,
@@ -31,8 +31,9 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
-import { clients, communications, teamMembers } from "@/lib/data";
-import type { Client, Communication } from "@/lib/data";
+import { supabaseBrowser } from "@/lib/supabase-browser";
+import { getClientsWithHealth } from "@/lib/queries/health";
+import type { ClientWithHealth } from "@/lib/queries/health";
 
 // ---------------------------------------------------------------------------
 // Document vault mock data
@@ -440,7 +441,7 @@ function ClientCard({ client, onClick }: { client: Client; onClick: () => void }
             </span>
             <AvatarGroup>
               {visibleMembers.map((name) => {
-                const member = teamMembers.find((m) => m.name === name);
+                const member = { avatar: name[0] };
                 return (
                   <Tooltip key={name}>
                     <TooltipTrigger asChild>
@@ -501,9 +502,8 @@ function ClientCard({ client, onClick }: { client: Client; onClick: () => void }
   );
 }
 
-function CommunicationRow({ comm }: { comm: Communication }) {
+function CommunicationRow({ comm, clientName }: { comm: Communication; clientName?: string }) {
   const { bg, text, Icon } = getCommTypeStyle(comm.type);
-  const client = clients.find((c) => c.id === comm.clientId);
 
   return (
     <div
@@ -526,12 +526,12 @@ function CommunicationRow({ comm }: { comm: Communication }) {
           >
             {comm.from}
           </span>
-          {client && (
+          {clientName && (
             <Badge
               variant="secondary"
               className="text-[10px] font-medium px-1.5 py-0"
             >
-              {client.name}
+              {clientName}
             </Badge>
           )}
         </div>
@@ -688,10 +688,63 @@ function AtRiskCard({ client }: { client: Client }) {
 // Page
 // ---------------------------------------------------------------------------
 
+type Client = {
+  id: string;
+  name: string;
+  entityType: string;
+  industry: string;
+  teamLead: string;
+  assignedTo: string[];
+  services: string[];
+  healthScore: number;
+  monthlyRetainer: number;
+  outstandingBalance: number;
+  lastContact: string;
+  lastContactType: "email" | "call" | "text";
+  status: "active" | "pending" | "at-risk";
+};
+
+type Communication = {
+  id: string;
+  clientId: string;
+  from: string;
+  type: "email" | "call" | "text";
+  subject?: string;
+  preview: string;
+  date: string;
+  read: boolean;
+};
+
+function mapToClient(c: ClientWithHealth): Client {
+  return {
+    id: String(c.accelo_id),
+    name: c.name,
+    entityType: c.entity_type ?? "",
+    industry: c.industry ?? "",
+    teamLead: c.assigned_to[0] ?? "",
+    assignedTo: c.assigned_to,
+    services: c.services,
+    healthScore: c.health_score,
+    monthlyRetainer: c.monthly_retainer,
+    outstandingBalance: c.outstanding_balance,
+    lastContact: c.date_last_interacted ?? "",
+    lastContactType: (c.last_contact_type as Client["lastContactType"]) ?? "email",
+    status: c.status,
+  };
+}
+
 export default function ClientsPage() {
   const [search, setSearch] = useState("");
   const [commFilter, setCommFilter] = useState<"all" | "email" | "call" | "text">("all");
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [communications] = useState<Communication[]>([]);
+
+  useEffect(() => {
+    getClientsWithHealth(supabaseBrowser)
+      .then((data) => setClients(data.map(mapToClient)))
+      .catch(console.error);
+  }, []);
 
   // Filter clients by search
   const filteredClients = useMemo(() => {
@@ -704,7 +757,7 @@ export default function ClientsPage() {
         c.entityType.toLowerCase().includes(q) ||
         c.services.some((s) => s.toLowerCase().includes(q))
     );
-  }, [search]);
+  }, [search, clients]);
 
   // At-risk clients
   const atRiskClients = useMemo(
@@ -712,7 +765,7 @@ export default function ClientsPage() {
       clients.filter(
         (c) => c.healthScore < 85 || c.status === "at-risk"
       ),
-    []
+    [clients]
   );
 
   // Sorted communications
@@ -722,7 +775,7 @@ export default function ClientsPage() {
     );
     if (commFilter === "all") return sorted;
     return sorted.filter((c) => c.type === commFilter);
-  }, [commFilter]);
+  }, [commFilter, communications]);
 
   const commFilterOptions: {
     label: string;
