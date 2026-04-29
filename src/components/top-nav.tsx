@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Users,
   CheckSquare,
+  DollarSign,
   LogOut,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -23,6 +24,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/clients", label: "Accounts", icon: Users },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },
+  { href: "/staff-costs", label: "Staff Costs", icon: DollarSign },
 ];
 
 export function TopNav() {

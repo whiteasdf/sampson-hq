@@ -1,6 +1,5 @@
-// Phase 5: sync-invoices — syncs invoices and contracts from Accelo.
-// Invoices use incremental sync via date_modified watermark.
-// Contracts do a full sync each run (small dataset, no date_modified filter).
+// sync-invoices — syncs invoices from Accelo.
+// Incremental sync via date_modified watermark.
 
 import { type NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-server";
@@ -61,31 +60,7 @@ export async function GET(request: NextRequest) {
       if (error) throw new Error(`invoices upsert: ${error.message}`);
     }
 
-    // ── 3. Sync contracts ──────────────────────────────────────────────────────
-    const contracts = await acceloFetchAll<Record<string, unknown>>("/contracts", {
-      _fields: "id,against_id,title,value,standing,date_expires",
-    });
-
-    if (contracts.length > 0) {
-      const contractRows = contracts.map((c) => ({
-        accelo_id: Number(c.id),
-        company_id: Number(c.against_id) || null,
-        title: String(c.title ?? ""),
-        value: Number(c.value) || 0,
-        standing: String(c.standing ?? ""),
-        date_expires: c.date_expires
-          ? new Date(Number(c.date_expires) * 1000).toISOString()
-          : null,
-        synced_at: now,
-      }));
-
-      const { error } = await supabaseAdmin
-        .from("contracts")
-        .upsert(contractRows, { onConflict: "accelo_id" });
-      if (error) throw new Error(`contracts upsert: ${error.message}`);
-    }
-
-    // ── 4. Update watermark ────────────────────────────────────────────────────
+    // ── 3. Update watermark ────────────────────────────────────────────────────
     const { error: wmErr } = await supabaseAdmin
       .from("sync_watermarks")
       .update({ last_synced_at: now })
@@ -95,7 +70,6 @@ export async function GET(request: NextRequest) {
     return Response.json({
       ok: true,
       invoices_synced: invoices.length,
-      contracts_synced: contracts.length,
       firstRun: isFirstRun,
     });
   } catch (err) {

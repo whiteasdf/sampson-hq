@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
   const rows = companies.map((c) => ({
     accelo_id: c.id,
     name:      c.name ?? "",
+    standing:  c.standing ?? null,
     synced_at: now,
   }));
 

@@ -6,7 +6,7 @@ import type { NextRequest } from "next/server";
 // When unset (local dev), all routes are accessible.
 const mode = process.env.APP_MODE;
 
-const PUBLIC_ROUTES = ["/login", "/auth/callback"];
+const PUBLIC_ROUTES = ["/login", "/auth/callback", "/api/cron", "/api/admin", "/api/dev-auth"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

@@ -19,8 +19,9 @@ type AcceloTask = {
   date_due: number;      // unix timestamp
   budgeted: number;      // seconds
   logged: number;        // seconds
-  staff:   { id: number } | null;
-  manager: { id: number } | null;
+  assignee: { id: number } | null;
+  staff:    { id: number } | null;
+  manager:  { id: number } | null;
   status:  { id: number; title: string; standing: string } | null;
 };
 
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
 
   // ── 2. Fetch from Accelo ─────────────────────────────────────────────────────
   const params: Record<string, string> = {
-    _fields: "id,title,against_id,against_type,standing,date_modified,date_due,budgeted,logged,staff(id),manager(id),status(id,title,standing)",
+    _fields: "id,title,against_id,against_type,standing,date_modified,date_due,budgeted,logged,assignee(id),staff(id),manager(id),status(id,title,standing)",
   };
 
   if (!isFirstRun) {
@@ -52,6 +53,33 @@ export async function GET(request: NextRequest) {
   }
 
   const tasks = await acceloFetchAll<AcceloTask>("/tasks", params);
+
+  // ── 2b. Resolve company_id via parent jobs ──────────────────────────────────
+  // Tasks are children of Jobs (Company → Job → Task), so against_type is
+  // almost always "job". Batch-fetch jobs to get their parent company_id.
+  const jobIds = [...new Set(
+    tasks
+      .filter((t) => t.against_type === "job")
+      .map((t) => t.against_id)
+  )];
+
+  const jobToCompanyMap = new Map<number, number>();
+
+  if (jobIds.length > 0) {
+    const jobs = await acceloFetchAll<{ id: number; company: { id: number } | null }>(
+      "/jobs",
+      {
+        _fields: "id,company(id)",
+        _filters: `id_in(${jobIds.join(",")})`,
+      }
+    );
+
+    for (const job of jobs) {
+      if (job.company?.id) {
+        jobToCompanyMap.set(job.id, job.company.id);
+      }
+    }
+  }
 
   if (tasks.length === 0) {
     await supabaseAdmin
@@ -77,8 +105,12 @@ export async function GET(request: NextRequest) {
   const transitions: Record<string, unknown>[] = [];
 
   for (const t of tasks) {
-    const companyId  = t.against_type === "company" ? t.against_id : null;
-    const assigneeId = t.staff?.id   ?? null;
+    const companyId  = t.against_type === "company"
+      ? t.against_id
+      : t.against_type === "job"
+        ? jobToCompanyMap.get(t.against_id) ?? null
+        : null;
+    const assigneeId = t.assignee?.id ?? t.staff?.id ?? null;
     const newStatusId = t.status?.id ?? null;
     const oldStatusId = existingMap.get(t.id);
 
@@ -94,13 +126,15 @@ export async function GET(request: NextRequest) {
     }
 
     rows.push({
-      accelo_id:   t.id,
-      title:       t.title ?? "",
-      status_id:   newStatusId,
-      assignee_id: assigneeId,
-      company_id:  companyId,
-      due_date:    t.date_due ? new Date(t.date_due * 1000).toISOString().split("T")[0] : null,
-      synced_at:   now,
+      accelo_id:        t.id,
+      title:            t.title ?? "",
+      status_id:        newStatusId,
+      assignee_id:      assigneeId,
+      company_id:       companyId,
+      due_date:         t.date_due ? new Date(t.date_due * 1000).toISOString().split("T")[0] : null,
+      budgeted_seconds: Math.round(Number(t.budgeted) || 0),
+      logged_seconds:   Math.round(Number(t.logged)   || 0),
+      synced_at:        now,
     });
   }
 

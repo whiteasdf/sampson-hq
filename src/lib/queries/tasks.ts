@@ -40,6 +40,8 @@ type TaskRow = {
   assignee_id: number | null;
   company_id: number | null;
   due_date: string | null;
+  budgeted_seconds: number | null;
+  logged_seconds: number | null;
   staff: { firstname: string | null; surname: string | null } | null;
   companies: { name: string } | null;
 };
@@ -58,8 +60,8 @@ function rowToTask(r: TaskRow): Task {
     priority:       "medium",    // not stored in DB yet
     status:         mapStatus(r.status_id),
     dueDate:        r.due_date ?? "",
-    estimatedHours: 0,           // not stored in DB yet
-    loggedHours:    0,           // compute from activities in a future phase
+    estimatedHours: Math.round(((r.budgeted_seconds ?? 0) / 3600) * 10) / 10,
+    loggedHours:    Math.round(((r.logged_seconds   ?? 0) / 3600) * 10) / 10,
     recurring:      false,       // not stored in DB yet
   };
 }
@@ -81,7 +83,7 @@ const TASK_SELECT = `
 // use manual join syntax: embed staff via a separate lookup after fetching.
 // For now, use a simpler select and resolve names client-side.
 
-const SIMPLE_TASK_SELECT = "accelo_id, title, status_id, assignee_id, company_id, due_date";
+const SIMPLE_TASK_SELECT = "accelo_id, title, status_id, assignee_id, company_id, due_date, budgeted_seconds, logged_seconds";
 
 // ── Query: all open tasks (managers) ──────────────────────────────────────────
 
