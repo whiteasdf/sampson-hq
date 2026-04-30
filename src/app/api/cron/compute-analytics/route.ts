@@ -1,19 +1,14 @@
 // Phase 4: Compute analytics snapshots
 // GET /api/cron/compute-analytics — aggregates weekly utilization, revenue, and
-// margin per staff member from activities and cost rates.
+// margin per staff member from time_entries and cost rates.
 // Triggered by Vercel Cron (hourly) — requires CRON_SECRET.
 //
-// NOTE: The activities table stores total `duration_seconds` (not separate
-// billable/nonbillable columns). All logged time is treated as billable for
-// revenue calculation. Once Accelo sync is extended to split billable vs
-// nonbillable seconds, this aggregation can be refined.
+// Data source: `time_entries` table (Supabase-first architecture).
+// Uses `rounded_seconds` (billable duration after 6-min rounding) and the
+// `billable` boolean flag to split billable vs non-billable hours.
+// Only completed entries (stopped_at IS NOT NULL) are counted.
 
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { supabaseAdmin } from "@/lib/supabase-server";
 
 export async function GET(request: Request) {
   if (
@@ -34,15 +29,20 @@ export async function GET(request: Request) {
   weekEnd.setDate(weekStart.getDate() + 6);
   weekEnd.setHours(23, 59, 59, 999);
 
-  // Fetch all activities for current week
-  const { data: weekActivities } = await supabase
-    .from("activities")
-    .select("staff_id, duration_seconds, rate_id")
-    .gte("date_logged", weekStart.toISOString())
-    .lte("date_logged", weekEnd.toISOString());
+  // Fetch completed time entries for current week
+  const { data: weekEntries, error: entriesErr } = await supabaseAdmin
+    .from("time_entries")
+    .select("staff_accelo_id, rounded_seconds, duration_seconds, rate_id, billable")
+    .not("stopped_at", "is", null)
+    .gte("started_at", weekStart.toISOString())
+    .lte("started_at", weekEnd.toISOString());
+
+  if (entriesErr) {
+    return Response.json({ error: `Failed to fetch time entries: ${entriesErr.message}` }, { status: 500 });
+  }
 
   // Fetch staff cost rates
-  const { data: costRates } = await supabase
+  const { data: costRates } = await supabaseAdmin
     .from("staff_cost_rates")
     .select("staff_accelo_id, hourly_cost");
 
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
   );
 
   // Fetch billing rates for revenue calculation
-  const { data: rates } = await supabase
+  const { data: rates } = await supabaseAdmin
     .from("rates")
     .select("id, charged");
 
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
 
   // Fetch completed task transitions this week
   // Status 5 = Complete (matches STATUS_ID_MAP in queries/tasks.ts)
-  const { data: completedTransitions } = await supabase
+  const { data: completedTransitions } = await supabaseAdmin
     .from("task_transitions")
     .select("task_accelo_id")
     .eq("to_status_id", 5)
@@ -71,22 +71,29 @@ export async function GET(request: Request) {
   // Aggregate by staff for weekly snapshot
   const staffWeekly = new Map<
     number,
-    { totalSeconds: number; revenue: number }
+    { billableSeconds: number; nonbillableSeconds: number; revenue: number }
   >();
 
-  for (const a of weekActivities ?? []) {
-    if (!a.staff_id) continue;
-    const existing = staffWeekly.get(a.staff_id) ?? {
-      totalSeconds: 0,
+  for (const entry of weekEntries ?? []) {
+    if (!entry.staff_accelo_id) continue;
+    const existing = staffWeekly.get(entry.staff_accelo_id) ?? {
+      billableSeconds: 0,
+      nonbillableSeconds: 0,
       revenue: 0,
     };
-    const seconds = a.duration_seconds ?? 0;
-    const hours = seconds / 3600;
-    const billingRate = a.rate_id ? (rateMap.get(a.rate_id) ?? 0) : 0;
+    const isBillable = entry.billable !== false;
 
-    existing.totalSeconds += seconds;
-    existing.revenue += hours * billingRate;
-    staffWeekly.set(a.staff_id, existing);
+    if (isBillable) {
+      const billSecs = entry.rounded_seconds ?? 0;
+      existing.billableSeconds += billSecs;
+      const billingRate = entry.rate_id ? (rateMap.get(entry.rate_id) ?? 0) : 0;
+      existing.revenue += (billSecs / 3600) * billingRate;
+    } else {
+      // Non-billable: use raw duration (not billing-rounded) for accurate cost tracking
+      existing.nonbillableSeconds += entry.duration_seconds ?? entry.rounded_seconds ?? 0;
+    }
+
+    staffWeekly.set(entry.staff_accelo_id, existing);
   }
 
   // Count completed tasks per staff via task assignees
@@ -98,7 +105,7 @@ export async function GET(request: Request) {
 
   const taskCompletedByStaff = new Map<number, number>();
   if (completedTaskIds.length > 0) {
-    const { data: completedTasks } = await supabase
+    const { data: completedTasks } = await supabaseAdmin
       .from("tasks")
       .select("accelo_id, assignee_id")
       .in("accelo_id", completedTaskIds);
@@ -118,10 +125,12 @@ export async function GET(request: Request) {
 
   const weeklyRows = Array.from(staffWeekly.entries()).map(
     ([staffId, data]) => {
-      const totalHrs = data.totalSeconds / 3600;
+      const billableHrs = data.billableSeconds / 3600;
+      const nonbillableHrs = data.nonbillableSeconds / 3600;
+      const totalHrs = billableHrs + nonbillableHrs;
       const costRate = costMap.get(staffId) ?? 0;
       const cost = totalHrs * costRate;
-      // Standard 40h work week for utilization calculation
+      // Standard 40h work week — only billable hours count towards utilization
       const standardHrs = 40;
 
       return {
@@ -129,11 +138,11 @@ export async function GET(request: Request) {
         period_end: weekEndStr,
         period_type: "week",
         staff_id: staffId,
-        billable_hrs: Math.round(totalHrs * 100) / 100,
-        nonbillable_hrs: 0, // Will be refined when activities split billable/nonbillable
+        billable_hrs: Math.round(billableHrs * 100) / 100,
+        nonbillable_hrs: Math.round(nonbillableHrs * 100) / 100,
         utilization:
           standardHrs > 0
-            ? Math.round((totalHrs / standardHrs) * 10000) / 100
+            ? Math.round((billableHrs / standardHrs) * 10000) / 100
             : 0,
         revenue: Math.round(data.revenue * 100) / 100,
         cost: Math.round(cost * 100) / 100,
@@ -145,7 +154,7 @@ export async function GET(request: Request) {
   );
 
   if (weeklyRows.length > 0) {
-    await supabase.from("analytics_snapshots").upsert(weeklyRows, {
+    await supabaseAdmin.from("analytics_snapshots").upsert(weeklyRows, {
       onConflict: "period_start,period_end,period_type,staff_id",
     });
   }

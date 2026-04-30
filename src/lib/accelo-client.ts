@@ -158,6 +158,92 @@ export async function acceloPost(
   return json.response;
 }
 
+// ── Typed helpers for outbound sync (Pivot 1D) ──────────────────────────────
+
+interface AcceloTaskPayload {
+  title: string;
+  against_type: "job";
+  against_id: number;
+  assignee?: number;
+  date_due?: string;
+  budgeted?: number;
+  status?: number;
+}
+
+interface AcceloActivityPayload {
+  against_type: "task";
+  against_id: number;
+  owner_id: number;
+  rate_id: number;
+  billable: number;
+  nonbillable: number;
+  subject: string;
+  body?: string;
+  medium: string;
+  standing: "complete";
+  date_logged: number;
+}
+
+export async function acceloCreateTask(
+  task: AcceloTaskPayload
+): Promise<{ id: number }> {
+  const body: Record<string, string | number | boolean> = {
+    title: task.title,
+    against_type: task.against_type,
+    against_id: task.against_id,
+  };
+  if (task.assignee != null) body.assignee = task.assignee;
+  if (task.date_due != null) body.date_due = task.date_due;
+  if (task.budgeted != null) body.budgeted = task.budgeted;
+  if (task.status != null) body.status = task.status;
+
+  const res = await acceloPost("/tasks", body);
+  const obj = res as Record<string, unknown>;
+  if (typeof obj?.id !== "number") {
+    throw new Error(`Accelo create task returned unexpected response: ${JSON.stringify(obj)}`);
+  }
+  return { id: obj.id };
+}
+
+export async function acceloUpdateTask(
+  acceloId: number,
+  fields: Partial<Omit<AcceloTaskPayload, "against_type" | "against_id">>
+): Promise<unknown> {
+  const body: Record<string, string | number | boolean> = {};
+  if (fields.title != null) body.title = fields.title;
+  if (fields.assignee != null) body.assignee = fields.assignee;
+  if (fields.date_due != null) body.date_due = fields.date_due;
+  if (fields.budgeted != null) body.budgeted = fields.budgeted;
+  if (fields.status != null) body.status = fields.status;
+
+  if (Object.keys(body).length === 0) return;
+
+  return acceloPut(`/tasks/${acceloId}`, body);
+}
+
+export async function acceloCreateActivity(
+  entry: AcceloActivityPayload
+): Promise<{ id: number }> {
+  const res = await acceloPost("/activities", {
+    against_type: entry.against_type,
+    against_id: entry.against_id,
+    owner_id: entry.owner_id,
+    rate_id: entry.rate_id,
+    billable: entry.billable,
+    nonbillable: entry.nonbillable,
+    subject: entry.subject,
+    body: entry.body ?? "",
+    medium: entry.medium,
+    standing: entry.standing,
+    date_logged: entry.date_logged,
+  });
+  const obj = res as Record<string, unknown>;
+  if (typeof obj?.id !== "number") {
+    throw new Error(`Accelo create activity returned unexpected response: ${JSON.stringify(obj)}`);
+  }
+  return { id: obj.id };
+}
+
 /**
  * PUT to an Accelo endpoint (for status/assignee updates).
  */

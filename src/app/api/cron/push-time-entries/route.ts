@@ -1,5 +1,5 @@
 // Pivot 1B: Push completed, unsynced time_entries to Accelo as activities.
-// Runs on a cron schedule (e.g. every 2 minutes). Processes up to 20 entries
+// Runs on a cron schedule (e.g. every 2 minutes). Processes up to 50 entries
 // per invocation to stay within serverless timeout limits.
 //
 // Flow:
@@ -11,9 +11,9 @@
 
 import { type NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-server";
-import { acceloPost } from "@/lib/accelo-client";
+import { acceloCreateActivity } from "@/lib/accelo-client";
 
-const BATCH_LIMIT = 20;
+const BATCH_LIMIT = 50;
 
 export async function GET(request: NextRequest) {
   if (request.headers.get("Authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -90,6 +90,26 @@ export async function GET(request: NextRequest) {
       continue;
     }
 
+    if (!entry.staff_accelo_id) {
+      failed++;
+      await insertSyncFailure(
+        entry.id,
+        { entry_id: entry.id, task_id: entry.task_id },
+        `Time entry id=${entry.id} has no staff_accelo_id — cannot push to Accelo`
+      );
+      continue;
+    }
+
+    if (entry.rate_id == null) {
+      failed++;
+      await insertSyncFailure(
+        entry.id,
+        { entry_id: entry.id, task_id: entry.task_id },
+        `Time entry id=${entry.id} has no rate_id — cannot push to Accelo without billing rate`
+      );
+      continue;
+    }
+
     const billableHours = entry.rounded_seconds / 3600;
     if (billableHours === 0) {
       // Duration rounds to zero — mark as synced to avoid infinite retries
@@ -102,11 +122,11 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-      const acceloActivity = await acceloPost("/activities", {
+      const acceloActivity = await acceloCreateActivity({
         against_type: "task",
         against_id: acceloTaskId,
-        staff_id: entry.staff_accelo_id,
-        rate_id: entry.rate_id ?? 0,
+        owner_id: entry.staff_accelo_id,
+        rate_id: entry.rate_id,
         billable: entry.billable ? billableHours : 0,
         nonbillable: entry.billable ? 0 : billableHours,
         subject: entry.description || "Time entry",
@@ -116,11 +136,10 @@ export async function GET(request: NextRequest) {
       });
 
       // Mirror to activities table for read-your-writes
-      const activity = acceloActivity as Record<string, unknown>;
-      if (activity?.id) {
+      if (acceloActivity?.id) {
         await supabaseAdmin.from("activities").upsert(
           {
-            accelo_id: Number(activity.id),
+            accelo_id: acceloActivity.id,
             subject: entry.description || "Time entry",
             duration_seconds: entry.rounded_seconds,
             staff_id: entry.staff_accelo_id,
