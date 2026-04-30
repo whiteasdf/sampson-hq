@@ -56,6 +56,181 @@ export type Database = {
         }
         Relationships: []
       }
+      time_entries: {
+        Row: {
+          id: number
+          user_id: string
+          staff_accelo_id: number
+          task_id: number
+          started_at: string
+          stopped_at: string
+          duration_seconds: number
+          rounded_seconds: number
+          billable: boolean
+          rate_id: number | null
+          description: string | null
+          synced_to_accelo_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: never
+          user_id: string
+          staff_accelo_id: number
+          task_id: number
+          started_at: string
+          stopped_at: string
+          duration_seconds: number
+          rounded_seconds: number
+          billable?: boolean
+          rate_id?: number | null
+          description?: string | null
+          synced_to_accelo_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: never
+          user_id?: string
+          staff_accelo_id?: number
+          task_id?: number
+          started_at?: string
+          stopped_at?: string
+          duration_seconds?: number
+          rounded_seconds?: number
+          billable?: boolean
+          rate_id?: number | null
+          description?: string | null
+          synced_to_accelo_at?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "time_entries_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "time_entries_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "time_entries_rate_id_fkey"
+            columns: ["rate_id"]
+            isOneToOne: false
+            referencedRelation: "rates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sync_failures: {
+        Row: {
+          id: number
+          entity_type: string
+          entity_id: number
+          operation: string
+          payload: Json | null
+          error_message: string | null
+          attempts: number
+          max_attempts: number
+          next_retry_at: string | null
+          resolved_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: never
+          entity_type: string
+          entity_id: number
+          operation: string
+          payload?: Json | null
+          error_message?: string | null
+          attempts?: number
+          max_attempts?: number
+          next_retry_at?: string | null
+          resolved_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: never
+          entity_type?: string
+          entity_id?: number
+          operation?: string
+          payload?: Json | null
+          error_message?: string | null
+          attempts?: number
+          max_attempts?: number
+          next_retry_at?: string | null
+          resolved_at?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      recurring_task_templates: {
+        Row: {
+          id: number
+          title: string
+          company_id: number | null
+          assignee_id: number | null
+          recurrence: string
+          day_of_week: number | null
+          day_of_month: number | null
+          default_status_id: number | null
+          budgeted_seconds: number | null
+          active: boolean
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: never
+          title: string
+          company_id?: number | null
+          assignee_id?: number | null
+          recurrence?: string
+          day_of_week?: number | null
+          day_of_month?: number | null
+          default_status_id?: number | null
+          budgeted_seconds?: number | null
+          active?: boolean
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: never
+          title?: string
+          company_id?: number | null
+          assignee_id?: number | null
+          recurrence?: string
+          day_of_week?: number | null
+          day_of_month?: number | null
+          default_status_id?: number | null
+          budgeted_seconds?: number | null
+          active?: boolean
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recurring_task_templates_default_status_id_fkey"
+            columns: ["default_status_id"]
+            isOneToOne: false
+            referencedRelation: "task_statuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recurring_task_templates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       app_config: {
         Row: {
           key: string
@@ -249,39 +424,48 @@ export type Database = {
       }
       tasks: {
         Row: {
-          accelo_id: number
+          accelo_id: number | null
           assignee_id: number | null
           company_id: number | null
           created_at: string | null
+          created_by: string | null
+          deleted_at: string | null
           due_date: string | null
           id: number
           job_id: number | null
           status_id: number | null
           synced_at: string
+          synced_to_accelo_at: string | null
           title: string
         }
         Insert: {
-          accelo_id: number
+          accelo_id?: number | null
           assignee_id?: number | null
           company_id?: number | null
           created_at?: string | null
+          created_by?: string | null
+          deleted_at?: string | null
           due_date?: string | null
           id?: never
           job_id?: number | null
           status_id?: number | null
           synced_at?: string
+          synced_to_accelo_at?: string | null
           title: string
         }
         Update: {
-          accelo_id?: number
+          accelo_id?: number | null
           assignee_id?: number | null
           company_id?: number | null
           created_at?: string | null
+          created_by?: string | null
+          deleted_at?: string | null
           due_date?: string | null
           id?: never
           job_id?: number | null
           status_id?: number | null
           synced_at?: string
+          synced_to_accelo_at?: string | null
           title?: string
         }
         Relationships: [
@@ -290,6 +474,13 @@ export type Database = {
             columns: ["status_id"]
             isOneToOne: false
             referencedRelation: "task_statuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
