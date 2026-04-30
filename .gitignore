@@ -42,3 +42,10 @@ ACCELO_API_FINDINGS.md
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# MCP server build output
+mcp/sampson-m365/dist/
+mcp/sampson-m365/node_modules/
+
+# MCP config (contains env vars)
+.mcp.json

@@ -153,8 +153,11 @@ function blankTask(clientName: string): Omit<Task, "id"> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function daysUntil(dateStr: string) {
-  return Math.ceil((new Date(dateStr).getTime() - TODAY_MS) / 86400000);
+function daysUntil(dateStr: string): number {
+  if (!dateStr) return 9999;
+  const ms = new Date(dateStr).getTime();
+  if (isNaN(ms)) return 9999;
+  return Math.ceil((ms - TODAY_MS) / 86400000);
 }
 function dueLabel(dateStr: string) {
   const d = daysUntil(dateStr);
@@ -256,10 +259,54 @@ export default function WorkerPage() {
     setNewTask(blankTask(clientName));
     setNewTaskClient(clientName);
   }
-  function createTask() {
+  async function createTask() {
     if (!newTask.title || !newTask.assignee) return;
-    setTaskList((p) => [{ ...newTask, id: `t${Date.now()}` }, ...p]);
+    const snapshot = { ...newTask };
+    const tempId = `t${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setTaskList((p) => [{ ...snapshot, id: tempId }, ...p]);
     setNewTaskClient(null);
+
+    try {
+      const { data: { session } } = await supabaseBrowser.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const staffRes = await supabaseBrowser.from("staff").select("accelo_id, firstname, surname");
+      const staff = (staffRes.data ?? []).find(
+        (s) => [s.firstname, s.surname].filter(Boolean).join(" ") === snapshot.assignee
+      );
+      if (!staff) throw new Error(`Could not resolve assignee: ${snapshot.assignee}`);
+
+      let companyAcceloId: number | undefined;
+      if (snapshot.client) {
+        const companyRes = await supabaseBrowser.from("companies").select("accelo_id, name");
+        const company = (companyRes.data ?? []).find((c) => c.name === snapshot.client);
+        if (!company) throw new Error(`Could not resolve client: ${snapshot.client}`);
+        companyAcceloId = company.accelo_id;
+      }
+
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          title: snapshot.title,
+          assignee_id: staff.accelo_id,
+          company_id: companyAcceloId,
+          status_id: 2,
+          due_date: snapshot.dueDate || undefined,
+          budgeted_seconds: snapshot.estimatedHours ? Math.round(snapshot.estimatedHours * 3600) : undefined,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const { task } = await res.json();
+      setTaskList((p) => p.map((t) => t.id === tempId ? { ...t, id: String(task.id) } : t));
+    } catch (err) {
+      console.error("Failed to create task:", err);
+      setTaskList((p) => p.filter((t) => t.id !== tempId));
+    }
   }
 
   // ── Derived data ───────────────────────────────────────────────────────────

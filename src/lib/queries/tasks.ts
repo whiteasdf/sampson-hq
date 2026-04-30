@@ -196,3 +196,84 @@ export async function getCompanyNames(supabase: SupabaseClient): Promise<string[
     .order("name");
   return (data ?? []).map((c) => c.name).filter(Boolean);
 }
+
+// ── Mutation: create a new task (Pivot 1C) ──────────────────────────────────
+
+type TaskInsertResult = {
+  id: number;
+  accelo_id: number | null;
+  title: string;
+  status_id: number | null;
+  assignee_id: number | null;
+  company_id: number | null;
+  due_date: string | null;
+  budgeted_seconds: number | null;
+  logged_seconds: number | null;
+};
+
+export async function createTaskInDb(
+  supabase: SupabaseClient,
+  params: {
+    title: string;
+    assignee_id?: number | null;
+    company_id?: number | null;
+    status_id?: number | null;
+    due_date?: string | null;
+    budgeted_seconds?: number | null;
+    created_by: string;
+  }
+): Promise<Task> {
+  const { data: rawData, error } = await supabase
+    .from("tasks")
+    .insert({
+      title: params.title,
+      assignee_id: params.assignee_id ?? null,
+      company_id: params.company_id ?? null,
+      status_id: params.status_id ?? 2, // default Pending
+      due_date: params.due_date ?? null,
+      budgeted_seconds: params.budgeted_seconds ?? null,
+      logged_seconds: 0,
+      accelo_id: null,
+      synced_to_accelo_at: null,
+      created_by: params.created_by,
+    })
+    .select(SIMPLE_TASK_SELECT + ", id")
+    .single();
+
+  if (error) throw new Error(`createTaskInDb: ${error.message}`);
+
+  const data = rawData as unknown as TaskInsertResult;
+
+  // Resolve assignee and company names for the returned Task
+  let staff: { firstname: string | null; surname: string | null } | null = null;
+  let companies: { name: string } | null = null;
+
+  if (data.assignee_id) {
+    const { data: s } = await supabase
+      .from("staff")
+      .select("firstname, surname")
+      .eq("accelo_id", data.assignee_id)
+      .single();
+    if (s) staff = s as { firstname: string | null; surname: string | null };
+  }
+  if (data.company_id) {
+    const { data: c } = await supabase
+      .from("companies")
+      .select("name")
+      .eq("accelo_id", data.company_id)
+      .single();
+    if (c) companies = c as { name: string };
+  }
+
+  // Use the DB-generated id (bigint PK) as the task identifier.
+  // accelo_id will be null for Supabase-native tasks.
+  const task = rowToTask({
+    ...data,
+    accelo_id: data.accelo_id ?? data.id,
+    staff,
+    companies,
+  });
+
+  // Override the id with the DB primary key so the UI can reference it
+  return { ...task, id: String(data.id) };
+}

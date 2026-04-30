@@ -1,24 +1,16 @@
-// Phase 4: Task status write-back
-// PUT /api/tasks/:id/status — change task status in Accelo, then mirror to Supabase.
+// Pivot 1C: Task status update (Supabase-first)
+// PUT /api/tasks/:id/status — update task status directly in Supabase.
+// Sets synced_to_accelo_at = NULL so the outbound push cron picks up the change.
 // Requires manager role (checked via app_metadata, consistent with RLS helpers).
 
 import { NextRequest } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { supabaseAdmin } from "@/lib/supabase-server";
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const acceloId = parseInt(id, 10);
-  if (isNaN(acceloId)) {
-    return Response.json({ error: "Invalid task ID" }, { status: 400 });
-  }
 
   const authHeader = request.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
@@ -39,36 +31,67 @@ export async function PUT(
     return Response.json({ error: "Manager role required" }, { status: 403 });
   }
 
-  const { status_id } = await request.json();
+  let body: { status_id?: number };
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { status_id } = body;
   if (!status_id) {
     return Response.json({ error: "Missing status_id" }, { status: 400 });
   }
 
   try {
-    // Dynamically import to avoid build errors if acceloPut is not yet available
-    const { acceloPut } = await import("@/lib/accelo-client");
+    const numericId = parseInt(id, 10);
+    if (isNaN(numericId)) {
+      return Response.json({ error: "Invalid task ID" }, { status: 400 });
+    }
 
-    // 1. Get current status for transition record
-    const { data: current } = await supabaseAdmin
+    // Resolve task: try Supabase PK first, then accelo_id (avoids ambiguity
+    // since new in-app tasks only have a PK, not an accelo_id)
+    let task: { id: number; accelo_id: number | null; status_id: number } | null = null;
+
+    const { data: byId } = await supabaseAdmin
       .from("tasks")
-      .select("status_id")
-      .eq("accelo_id", acceloId)
+      .select("id, accelo_id, status_id")
+      .eq("id", numericId)
+      .is("deleted_at", null)
       .single();
 
-    // 2. PUT to Accelo first (source of truth)
-    await acceloPut(`/tasks/${acceloId}`, { status_id });
+    if (byId) {
+      task = byId;
+    } else {
+      const { data: byAccelo } = await supabaseAdmin
+        .from("tasks")
+        .select("id, accelo_id, status_id")
+        .eq("accelo_id", numericId)
+        .is("deleted_at", null)
+        .single();
+      task = byAccelo;
+    }
 
-    // 3. On success: update Supabase mirror
-    await supabaseAdmin
+    if (!task) {
+      return Response.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    const { error: updateError } = await supabaseAdmin
       .from("tasks")
-      .update({ status_id, synced_at: new Date().toISOString() })
-      .eq("accelo_id", acceloId);
+      .update({ status_id, synced_to_accelo_at: null })
+      .eq("id", task.id)
+      .is("deleted_at", null);
 
-    // 4. Record transition (uses transitioned_at to match existing schema)
-    if (current?.status_id && current.status_id !== status_id) {
+    if (updateError) {
+      return Response.json({ error: updateError.message }, { status: 500 });
+    }
+
+    // Record transition (only for Accelo-synced tasks — Supabase-native tasks
+    // don't have an accelo_id yet, so skip to avoid corrupting the column)
+    if (task.accelo_id && task.status_id && task.status_id !== status_id) {
       await supabaseAdmin.from("task_transitions").insert({
-        task_accelo_id: acceloId,
-        from_status_id: current.status_id,
+        task_accelo_id: task.accelo_id,
+        from_status_id: task.status_id,
         to_status_id: status_id,
         transitioned_at: new Date().toISOString(),
         detected_at: new Date().toISOString(),
@@ -78,6 +101,6 @@ export async function PUT(
     return Response.json({ ok: true, status_id });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ error: message }, { status: 502 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

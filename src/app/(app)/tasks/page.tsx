@@ -258,10 +258,50 @@ export default function TasksPage() {
       await new Promise((r) => setTimeout(r, 250));
     }
   }
-  function createTask() {
+  async function createTask() {
     if (!newTask.title || !newTask.client || !newTask.assignee) return;
-    setTaskList((p) => [{ ...newTask, id: `t${Date.now()}` }, ...p]);
+    const snapshot = { ...newTask };
+    const tempId = `t${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setTaskList((p) => [{ ...snapshot, id: tempId }, ...p]);
     setNewTask(blankTask()); setNewTaskOpen(false);
+
+    try {
+      const { data: { session } } = await supabaseBrowser.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const staffRes = await supabaseBrowser.from("staff").select("accelo_id, firstname, surname");
+      const staff = (staffRes.data ?? []).find(
+        (s) => [s.firstname, s.surname].filter(Boolean).join(" ") === snapshot.assignee
+      );
+      if (!staff) throw new Error(`Could not resolve assignee: ${snapshot.assignee}`);
+
+      const companyRes = await supabaseBrowser.from("companies").select("accelo_id, name");
+      const company = (companyRes.data ?? []).find((c) => c.name === snapshot.client);
+      if (!company) throw new Error(`Could not resolve client: ${snapshot.client}`);
+
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          title: snapshot.title,
+          assignee_id: staff.accelo_id,
+          company_id: company.accelo_id,
+          status_id: 2,
+          due_date: snapshot.dueDate || undefined,
+          budgeted_seconds: snapshot.estimatedHours ? Math.round(snapshot.estimatedHours * 3600) : undefined,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const { task } = await res.json();
+      setTaskList((p) => p.map((t) => t.id === tempId ? { ...t, id: String(task.id) } : t));
+    } catch (err) {
+      console.error("Failed to create task:", err);
+      setTaskList((p) => p.filter((t) => t.id !== tempId));
+    }
   }
 
   function toggleSort(key: SortKey) {

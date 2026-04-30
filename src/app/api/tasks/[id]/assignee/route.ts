@@ -1,24 +1,16 @@
-// Phase 4: Task assignee write-back
-// PUT /api/tasks/:id/assignee — reassign task in Accelo, then mirror to Supabase.
+// Pivot 1C: Task assignee update (Supabase-first)
+// PUT /api/tasks/:id/assignee — reassign task directly in Supabase.
+// Sets synced_to_accelo_at = NULL so the outbound push cron picks up the change.
 // Requires manager role (checked via app_metadata, consistent with RLS helpers).
 
 import { NextRequest } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { supabaseAdmin } from "@/lib/supabase-server";
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const acceloId = parseInt(id, 10);
-  if (isNaN(acceloId)) {
-    return Response.json({ error: "Invalid task ID" }, { status: 400 });
-  }
 
   const authHeader = request.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
@@ -38,27 +30,63 @@ export async function PUT(
     return Response.json({ error: "Manager role required" }, { status: 403 });
   }
 
-  const { assignee_id } = await request.json();
+  let body: { assignee_id?: number };
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { assignee_id } = body;
   if (!assignee_id) {
     return Response.json({ error: "Missing assignee_id" }, { status: 400 });
   }
 
   try {
-    // Dynamically import to avoid build errors if acceloPut is not yet available
-    const { acceloPut } = await import("@/lib/accelo-client");
+    const numericId = parseInt(id, 10);
+    if (isNaN(numericId)) {
+      return Response.json({ error: "Invalid task ID" }, { status: 400 });
+    }
 
-    // PUT to Accelo first (source of truth)
-    await acceloPut(`/tasks/${acceloId}`, { assignee_id });
+    // Resolve task: try Supabase PK first, then accelo_id
+    let taskId: number | null = null;
 
-    // On success: update Supabase mirror
-    await supabaseAdmin
+    const { data: byId } = await supabaseAdmin
       .from("tasks")
-      .update({ assignee_id, synced_at: new Date().toISOString() })
-      .eq("accelo_id", acceloId);
+      .select("id")
+      .eq("id", numericId)
+      .is("deleted_at", null)
+      .single();
+
+    if (byId) {
+      taskId = byId.id;
+    } else {
+      const { data: byAccelo } = await supabaseAdmin
+        .from("tasks")
+        .select("id")
+        .eq("accelo_id", numericId)
+        .is("deleted_at", null)
+        .single();
+      taskId = byAccelo?.id ?? null;
+    }
+
+    if (!taskId) {
+      return Response.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from("tasks")
+      .update({ assignee_id, synced_to_accelo_at: null })
+      .eq("id", taskId)
+      .is("deleted_at", null);
+
+    if (updateError) {
+      return Response.json({ error: updateError.message }, { status: 500 });
+    }
 
     return Response.json({ ok: true, assignee_id });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ error: message }, { status: 502 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }
