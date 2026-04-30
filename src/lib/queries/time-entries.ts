@@ -166,6 +166,30 @@ export async function getRecentEntries(
 }
 
 /**
+ * Return completed entries for a user within a date range, ordered by
+ * started_at DESC. Used by the time-log history page. Only returns
+ * stopped entries (stopped_at IS NOT NULL).
+ */
+export async function getEntriesInRange(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  from: string,
+  to: string
+): Promise<TimeEntryRow[]> {
+  const { data, error } = await supabase
+    .from("time_entries")
+    .select("*")
+    .eq("user_id", userId)
+    .not("stopped_at", "is", null)
+    .gte("started_at", from)
+    .lte("started_at", to)
+    .order("started_at", { ascending: false });
+
+  if (error) throw new Error(`getEntriesInRange: ${error.message}`);
+  return data ?? [];
+}
+
+/**
  * Partial update of a time entry. Ensures user_id matches to prevent
  * cross-user edits.
  */
@@ -201,6 +225,45 @@ export async function updateTimeEntry(
 
   if (error) throw new Error(`updateTimeEntry: ${error.message}`);
   return data;
+}
+
+/**
+ * Delete a time entry by id. Only allows deletion if the entry belongs to
+ * the given user and has NOT been synced to Accelo (synced_to_accelo_at IS NULL).
+ * Returns the deleted row.
+ */
+export async function deleteTimeEntry(
+  supabase: SupabaseClient<Database>,
+  params: { id: number; user_id: string }
+): Promise<TimeEntryRow> {
+  // Verify the entry exists, belongs to this user, and is not synced.
+  const { data: existing, error: fetchErr } = await supabase
+    .from("time_entries")
+    .select("*")
+    .eq("id", params.id)
+    .eq("user_id", params.user_id)
+    .single();
+
+  if (fetchErr || !existing) {
+    throw new Error(
+      fetchErr
+        ? `deleteTimeEntry fetch: ${fetchErr.message}`
+        : `deleteTimeEntry: no entry found with id=${params.id}`
+    );
+  }
+
+  if (existing.synced_to_accelo_at) {
+    throw new Error("deleteTimeEntry: cannot delete an entry that has been synced to Accelo");
+  }
+
+  const { error: deleteErr } = await supabase
+    .from("time_entries")
+    .delete()
+    .eq("id", params.id)
+    .eq("user_id", params.user_id);
+
+  if (deleteErr) throw new Error(`deleteTimeEntry delete: ${deleteErr.message}`);
+  return existing;
 }
 
 /**

@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -669,6 +669,25 @@ export default function WorkerPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => { setInfoTask(null); setInfoNote(""); setInfoMethod("email"); }}>Cancel</Button>
             <Button onClick={confirmInfoRequest} className="gap-2"><Mail className="size-3.5" /> Send Request</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Short Time Entry Confirmation Dialog ─────────────────────────── */}
+      <Dialog open={!!timer.pendingConfirmation} onOpenChange={(open) => { if (!open) timer.confirmEntry(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="size-4 text-amber-500" />
+              Very Short Time Entry
+            </DialogTitle>
+            <DialogDescription>
+              This entry is only {timer.pendingConfirmation?.duration_seconds ?? 0} second{(timer.pendingConfirmation?.duration_seconds ?? 0) !== 1 ? "s" : ""}. Would you like to save it?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => timer.discardEntry()}>Discard</Button>
+            <Button onClick={() => timer.confirmEntry()}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

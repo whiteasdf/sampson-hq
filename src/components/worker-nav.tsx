@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export function WorkerNav() {
+  const pathname = usePathname();
+
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-xl" style={{ borderBottomColor: "rgba(195,151,73,0.25)" }}>
-      <div className="mx-auto flex h-14 max-w-2xl items-center px-6">
+      <div className="mx-auto flex h-14 max-w-2xl items-center gap-6 px-6">
         <Link href="/worker" className="flex items-center gap-2 shrink-0">
           <div className="flex h-7 w-7 items-center justify-center rounded-md shrink-0" style={{ backgroundColor: "#1B3D21" }}>
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="#C39749" xmlns="http://www.w3.org/2000/svg">
@@ -13,6 +16,28 @@ export function WorkerNav() {
             </svg>
           </div>
         </Link>
+        <nav className="flex items-center gap-1">
+          <Link
+            href="/worker"
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              pathname === "/worker"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            Dashboard
+          </Link>
+          <Link
+            href="/worker/time-log"
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              pathname === "/worker/time-log"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            Time Log
+          </Link>
+        </nav>
       </div>
     </header>
   );

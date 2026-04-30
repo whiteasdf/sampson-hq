@@ -35,6 +35,9 @@ type UseTimerReturn = {
   startTimer: (taskId: number, billable?: boolean) => Promise<void>;
   stopTimer: (description?: string) => Promise<void>;
   updateEntry: (updates: { billable?: boolean; description?: string }) => Promise<void>;
+  pendingConfirmation: TimeEntry | null;
+  confirmEntry: () => void;
+  discardEntry: () => Promise<void>;
   formattedTime: string;
   billingHours: number;
   isLoading: boolean;
@@ -90,6 +93,7 @@ export function useTimer(): UseTimerReturn {
   const [elapsed, setElapsed]         = useState(0);
   const [isLoading, setIsLoading]     = useState(true); // H1: start true so buttons disabled until restore completes
   const [error, setError]             = useState<string | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<TimeEntry | null>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeEntryRef = useRef(activeEntry);
@@ -308,6 +312,14 @@ export function useTimer(): UseTimerReturn {
         throw new Error(text || `POST /stop failed: ${res.status}`);
       }
 
+      const data = await res.json();
+      const stoppedEntry = data.entry as TimeEntry;
+
+      // If the entry is very short (< 60s), prompt for confirmation
+      if (stoppedEntry.duration_seconds !== null && stoppedEntry.duration_seconds < 60) {
+        setPendingConfirmation(stoppedEntry);
+      }
+
       writeFallback(null);
       lsRemoveTask(String(stoppingEntry.task_id));
     } catch (err) {
@@ -353,6 +365,39 @@ export function useTimer(): UseTimerReturn {
     }
   }, []);
 
+  // ── confirmEntry ───────────────────────────────────────────────────────────
+
+  const confirmEntry = useCallback(() => {
+    setPendingConfirmation(null);
+  }, []);
+
+  // ── discardEntry ──────────────────────────────────────────────────────────
+
+  const discardEntry = useCallback(async () => {
+    const entry = pendingConfirmation;
+    if (!entry || entry.id.startsWith("__")) {
+      setPendingConfirmation(null);
+      return;
+    }
+
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`/api/time-entries/${entry.id}`, {
+        method: "DELETE",
+        headers,
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `DELETE failed: ${res.status}`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to discard entry");
+    } finally {
+      setPendingConfirmation(null);
+    }
+  }, [pendingConfirmation]);
+
   // ── Derived values ────────────────────────────────────────────────────────
 
   const isRunning     = activeEntry !== null;
@@ -366,6 +411,9 @@ export function useTimer(): UseTimerReturn {
     startTimer,
     stopTimer,
     updateEntry,
+    pendingConfirmation,
+    confirmEntry,
+    discardEntry,
     formattedTime,
     billingHours,
     isLoading,
