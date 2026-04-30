@@ -249,21 +249,27 @@ export type Database = {
       companies: {
         Row: {
           accelo_id: number
+          default_job_accelo_id: number | null
           id: number
           name: string
           synced_at: string
+          synced_to_accelo_at: string | null
         }
         Insert: {
           accelo_id: number
+          default_job_accelo_id?: number | null
           id?: never
           name: string
           synced_at?: string
+          synced_to_accelo_at?: string | null
         }
         Update: {
           accelo_id?: number
+          default_job_accelo_id?: number | null
           id?: never
           name?: string
           synced_at?: string
+          synced_to_accelo_at?: string | null
         }
         Relationships: []
       }
