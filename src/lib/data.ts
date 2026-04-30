@@ -35,7 +35,7 @@ export type Task = {
   assignee: string;
   category: string;
   priority: "high" | "medium" | "low";
-  status: "todo" | "in-progress" | "review" | "done";
+  status: "todo" | "in-progress" | "review" | "done" | "waiting";
   dueDate: string;
   estimatedHours: number;
   loggedHours: number;

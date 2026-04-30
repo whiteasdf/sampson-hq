@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { firmStats, teamMembers, clients, timeEntries } from "@/lib/data";
+import { useState, useMemo, useEffect } from "react";
+import { teamMembers as mockTeamMembers, timeEntries as mockTimeEntries } from "@/lib/data";
+import type { TeamMember, TimeEntry } from "@/lib/data";
+import type { Task } from "@/lib/data";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -61,8 +63,41 @@ type RichTask = {
   notes: TaskNote[];
 };
 
-// ── Mock Data ─────────────────────────────────────────────────────────────────
+// ── Status mapping ───────────────────────────────────────────────────────────
 
+const STATUS_TO_STAGE: Record<number, Stage> = {
+  2: "in-progress",   // Pending
+  3: "in-progress",   // Accepted
+  4: "in-progress",   // Started
+  7: "waiting-on-client", // Paused
+};
+
+function taskToRich(t: Task): RichTask {
+  const statusId = parseInt(t.id, 10) % 10;
+  return {
+    id: t.id,
+    client: t.client || "Unknown",
+    serviceType: t.category || "General",
+    deliverable: t.title,
+    deadline: t.dueDate || "",
+    assignee: t.assignee || "Unassigned",
+    assignedBy: "",
+    assignedAt: "",
+    stage: t.status === "waiting" ? "waiting-on-client"
+         : t.status === "review" ? "in-review"
+         : t.status === "done" ? "ready-to-bill"
+         : "in-progress",
+    stageEnteredAt: t.dueDate || new Date().toISOString().split("T")[0],
+    priority: t.priority,
+    estimatedHours: t.estimatedHours,
+    loggedHours: t.loggedHours,
+    dependencies: [],
+    history: [],
+    notes: [],
+  };
+}
+
+// Mock data kept as fallback until Supabase backfill populates activities
 const richTasks: RichTask[] = [
   {
     id: "rt1",
@@ -367,18 +402,59 @@ function formatCurrency(n: number): string {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+type DashboardData = {
+  capacity: TeamMember[];
+  timeLog: TimeEntry[];
+};
+
 export default function DashV2Page() {
+  const [tasks, setTasks] = useState<RichTask[]>(richTasks);
+  const [dashData, setDashData] = useState<DashboardData | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/dashboard")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.tasks?.length > 0) {
+          setTasks(data.tasks.slice(0, 50).map(taskToRich));
+        }
+        const capacity = data.capacity?.length > 0 ? data.capacity : null;
+        const timeLog = data.timeLog?.length > 0
+          ? data.timeLog.map((e: Record<string, unknown>) => ({
+              id: String(e.id),
+              taskId: e.taskId != null ? String(e.taskId) : "",
+              member: String(e.staffName ?? ""),
+              client: String(e.clientName ?? ""),
+              category: String(e.category ?? ""),
+              description: String(e.subject ?? ""),
+              duration: Number(e.durationHours) || 0,
+              date: String(e.dateLogged ?? "").slice(0, 10),
+              billable: Boolean(e.billable),
+            }))
+          : null;
+        setDashData({
+          capacity: capacity ?? mockTeamMembers,
+          timeLog: timeLog ?? mockTimeEntries,
+        });
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, []);
+
+  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
   return (
     <div className="space-y-8">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Manager Overview</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">February 26, 2026</p>
+        <p className="mt-0.5 text-sm text-muted-foreground">{today}</p>
       </header>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_360px]">
-        <TaskFeedCard tasks={richTasks} />
+        <TaskFeedCard tasks={tasks} />
         <div className="space-y-5">
-          <TeamCapacityCard />
+          <TeamCapacityCard tasks={tasks} dashData={dashData} />
         </div>
       </div>
     </div>
@@ -716,10 +792,22 @@ function TaskFeedRow({ task }: { task: RichTask }) {
 
 // ── Team Capacity Card ────────────────────────────────────────────────────────
 
-const TODAY_LOG      = "2026-02-20";
-const WEEK_START     = "2026-02-23";
-const WEEK_END       = "2026-02-28";
-const LUNCH_PER_DAY  = 0.5; // fixed, permanent — labeled separately
+const TODAY_LOG      = "2026-02-20"; // mock data date — used only when Supabase is empty
+const LUNCH_PER_DAY  = 0.5;
+
+function currentWeekBounds(): { weekStart: string; weekEnd: string } {
+  const now = new Date();
+  const day = now.getDay();
+  const diffToMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - diffToMonday);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return {
+    weekStart: monday.toISOString().slice(0, 10),
+    weekEnd:   sunday.toISOString().slice(0, 10),
+  };
+}
 
 // PTO this week per person (variable; meetings/admin come from logged time)
 const WEEKLY_PTO: Record<string, number> = {
@@ -727,28 +815,33 @@ const WEEKLY_PTO: Record<string, number> = {
   "Henry": 8,  // 1 day PTO
 };
 
-function TeamCapacityCard() {
+function TeamCapacityCard({ tasks, dashData }: { tasks: RichTask[]; dashData: DashboardData | null }) {
   const [cardView, setCardView] = useState<"capacity" | "time-log">("capacity");
   const [openId, setOpenId] = useState<string | null>(null);
 
+  const teamMembers = dashData?.capacity ?? mockTeamMembers;
+  const timeEntries = dashData?.timeLog ?? mockTimeEntries;
+  const timeLogLive = dashData?.timeLog !== undefined && dashData.timeLog !== mockTimeEntries;
+
   const taskHoursByMember = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const t of richTasks) {
+    for (const t of tasks) {
       map[t.assignee] = (map[t.assignee] ?? 0) + t.estimatedHours;
     }
     return map;
-  }, []);
+  }, [tasks]);
 
-  // Non-billable logged hours this week, grouped by member → category → total
+  const { weekStart, weekEnd } = useMemo(() => currentWeekBounds(), []);
+
   const nonBillableByMember = useMemo(() => {
     const map: Record<string, Record<string, number>> = {};
     for (const e of timeEntries) {
-      if (e.billable || e.date < WEEK_START || e.date > WEEK_END) continue;
+      if (e.billable || e.date < weekStart || e.date > weekEnd) continue;
       if (!map[e.member]) map[e.member] = {};
       map[e.member][e.category] = (map[e.member][e.category] ?? 0) + e.duration;
     }
     return map;
-  }, []);
+  }, [timeEntries, weekStart, weekEnd]);
 
   // Pre-compute capacity tiers for every member, then sort by real load
   const memberRows = useMemo(() => {
@@ -764,11 +857,11 @@ function TeamCapacityCard() {
       const loadPct        = Math.min(100, Math.round((taskHours / netCapacity) * 100));
       return { ...m, taskHours, ptoHours, availHours, daysWorked, lunchHours, nbByCategory, nbLoggedHours, netCapacity, loadPct };
     }).sort((a, b) => b.loadPct - a.loadPct);
-  }, [taskHoursByMember, nonBillableByMember]);
+  }, [teamMembers, taskHoursByMember, nonBillableByMember]);
 
   const todayEntries = useMemo(
-    () => timeEntries.filter((e) => e.date === TODAY_LOG),
-    []
+    () => timeLogLive ? timeEntries : timeEntries.filter((e) => e.date === TODAY_LOG),
+    [timeEntries, timeLogLive]
   );
   const todayTotal    = todayEntries.reduce((s, e) => s + e.duration, 0);
   const todayBillable = todayEntries.filter((e) => e.billable).reduce((s, e) => s + e.duration, 0);

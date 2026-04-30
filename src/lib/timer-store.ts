@@ -68,3 +68,58 @@ export function liveElapsed(entry: TimerEntry): number {
     ? entry.elapsed + Math.floor((Date.now() - entry.runSince) / 1000)
     : entry.elapsed;
 }
+
+/**
+ * 6-minute billing increment rounding.
+ * 360 seconds = 0.1 hours (industry standard for accounting).
+ */
+export function timerToHours(elapsedSeconds: number): number {
+  const rounded = Math.ceil(elapsedSeconds / 360) * 360;
+  return rounded / 3600;
+}
+
+export function formatBillingTime(elapsedSeconds: number): string {
+  const hours = timerToHours(elapsedSeconds);
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+// ── Retry queue for failed Accelo writes ──────────────────────────────────────
+
+export type PendingEntry = {
+  accelo_task_id: number;
+  elapsed_seconds: number;
+  description: string;
+  billable: boolean;
+  queued_at: number;
+};
+
+const PENDING_KEY = "sampson_pending_entries";
+
+export function getPendingEntries(): PendingEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(PENDING_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+export function addPendingEntry(entry: PendingEntry): void {
+  const queue = getPendingEntries();
+  queue.push(entry);
+  localStorage.setItem(PENDING_KEY, JSON.stringify(queue));
+}
+
+export function removePendingEntry(index: number): void {
+  const queue = getPendingEntries();
+  queue.splice(index, 1);
+  localStorage.setItem(PENDING_KEY, JSON.stringify(queue));
+}
+
+export function clearPendingEntries(): void {
+  localStorage.removeItem(PENDING_KEY);
+}

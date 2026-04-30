@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { tasks, teamMembers, clients, serviceCategories, clientDocuments } from "@/lib/data";
-import type { Task, ClientDocument } from "@/lib/data";
+import type { Task } from "@/lib/data";
+import { serviceCategories, clientDocuments } from "@/lib/data";
+import type { ClientDocument } from "@/lib/data";
+import { supabaseBrowser } from "@/lib/supabase-browser";
+import { getWorkerTasks, getStaffNames, getCompanyNames } from "@/lib/queries/tasks";
+import { useTimer } from "@/hooks/use-timer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -11,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -24,21 +28,7 @@ import {
   FileText, FileSpreadsheet, FileType, ExternalLink, FolderOpen,
 } from "lucide-react";
 
-// ── Data ──────────────────────────────────────────────────────────────────────
-
-const EXTRA_TASKS: Task[] = [
-  { id: "t13", title: "Bank Rec — January",  client: "OES",   assignee: "Gio",    category: "Bank & CC Rec's", priority: "medium", status: "todo", dueDate: "2026-02-27", estimatedHours: 3, loggedHours: 0, recurring: true  },
-  { id: "t14", title: "Q4 Sales Tax",         client: "Elan",  assignee: "Gio",    category: "Sales Tax",       priority: "low",    status: "todo", dueDate: "2026-03-10", estimatedHours: 2, loggedHours: 0, recurring: false },
-  { id: "t15", title: "AP Review — February", client: "Monda", assignee: "Faizan", category: "AP & AR",         priority: "medium", status: "todo", dueDate: "2026-02-26", estimatedHours: 2, loggedHours: 0, recurring: true  },
-  { id: "t16", title: "Monthly Close",        client: "OBI",   assignee: "Mitch",  category: "Bookkeeping",     priority: "high",   status: "todo", dueDate: "2026-02-25", estimatedHours: 5, loggedHours: 1, recurring: true  },
-  { id: "t17", title: "Payroll — March 1",    client: "WWB",   assignee: "Jordea", category: "Payroll",         priority: "high",   status: "todo", dueDate: "2026-02-28", estimatedHours: 3, loggedHours: 0, recurring: true  },
-];
-
-const SEED_TASKS: Task[] = [...tasks, ...EXTRA_TASKS];
-const WORKERS = teamMembers.map((m) => m.name);
-
-// Tasks that are blocked waiting on client (hardcoded for mock)
-const WAITING_IDS = new Set(["t3", "t5"]);
+// Data is loaded from Supabase at runtime via useEffect.
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -119,6 +109,7 @@ const statusDot: Record<Task["status"], string> = {
   "todo":        "bg-slate-400",
   "in-progress": "bg-blue-500",
   "review":      "bg-violet-500",
+  "waiting":     "bg-amber-400",
   "done":        "bg-emerald-500",
 };
 
@@ -128,6 +119,7 @@ const statusConfig: Record<Task["status"], { label: string; className: string; i
   "todo":        { label: "To Do",       className: "bg-slate-100 text-slate-600 border-slate-200",      icon: Clock        },
   "in-progress": { label: "In Progress", className: "bg-blue-50 text-blue-700 border-blue-200",          icon: RefreshCw    },
   "review":      { label: "In Review",   className: "bg-violet-50 text-violet-700 border-violet-200",    icon: Eye          },
+  "waiting":     { label: "Waiting",     className: "bg-amber-50 text-amber-700 border-amber-200",       icon: Hourglass    },
   "done":        { label: "Done",        className: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
 };
 
@@ -161,8 +153,11 @@ function blankTask(clientName: string): Omit<Task, "id"> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function daysUntil(dateStr: string) {
-  return Math.ceil((new Date(dateStr).getTime() - TODAY_MS) / 86400000);
+function daysUntil(dateStr: string): number {
+  if (!dateStr) return 9999;
+  const ms = new Date(dateStr).getTime();
+  if (isNaN(ms)) return 9999;
+  return Math.ceil((ms - TODAY_MS) / 86400000);
 }
 function dueLabel(dateStr: string) {
   const d = daysUntil(dateStr);
@@ -193,18 +188,22 @@ function formatDate(iso: string) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function WorkerPage() {
-  const [taskList, setTaskList]             = useState<Task[]>(SEED_TASKS);
-  const [selectedWorker, setSelectedWorker] = useState("Gio");
+  const [taskList, setTaskList]             = useState<Task[]>([]);
+  const [workers, setWorkers]               = useState<string[]>([]);
+  const [selectedWorker, setSelectedWorker] = useState("");
   const [greeting, setGreeting]             = useState("");
 
-  // Timer
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [timerStart, setTimerStart]     = useState<number | null>(null);
-  // Accumulated seconds per task across multiple start/pause cycles this session
-  const [baseSeconds, setBaseSeconds]   = useState<Record<string, number>>({});
-  // Ticks every second to force a re-render while the timer is running
-  const [, setTick]                     = useState(0);
-  const [focusMode, setFocusMode]       = useState(false);
+  useEffect(() => {
+    getWorkerTasks(supabaseBrowser).then(setTaskList).catch(console.error);
+    getStaffNames(supabaseBrowser).then((names) => {
+      setWorkers(names);
+      if (names.length > 0) setSelectedWorker(names[0]);
+    }).catch(console.error);
+  }, []);
+
+  // Timer — powered by Supabase-backed hook
+  const timer = useTimer();
+  const [focusMode, setFocusMode] = useState(false);
 
   // Accounts section state
   const [infoRequested, setInfoRequested] = useState<Set<string>>(new Set());
@@ -220,57 +219,32 @@ export default function WorkerPage() {
     setGreeting(new Date().getHours() < 12 ? "Good morning" : "Good afternoon");
   }, []);
 
-  useEffect(() => {
-    if (!activeTaskId) return;
-    const id = setInterval(() => setTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [activeTaskId]);
+  // ── Timer actions (delegated to useTimer hook) ─────────────────────────────
 
-  // Live elapsed for any task: accumulated base + current interval (if active)
+  const activeTaskId = timer.activeEntry ? String(timer.activeEntry.task_id) : null;
+
   function getElapsed(taskId: string): number {
-    const base = baseSeconds[taskId] ?? 0;
-    if (taskId === activeTaskId && timerStart !== null) {
-      return base + Math.floor((Date.now() - timerStart) / 1000);
-    }
-    return base;
+    // Only the active task has a live elapsed counter.
+    if (taskId === activeTaskId) return timer.elapsed;
+    return 0;
   }
 
-  // ── Timer actions ──────────────────────────────────────────────────────────
-
-  function logSeconds(taskId: string, seconds: number) {
-    const hours = Math.round((seconds / 3600) * 100) / 100;
-    setTaskList((p) => p.map((t) => t.id === taskId ? { ...t, loggedHours: Math.round((t.loggedHours + hours) * 100) / 100 } : t));
-  }
-
-  function startTask(taskId: string) {
-    // Pause the currently running task — save interval into baseSeconds without logging
-    if (activeTaskId && timerStart !== null) {
-      const interval = Math.floor((Date.now() - timerStart) / 1000);
-      setBaseSeconds((p) => ({ ...p, [activeTaskId]: (p[activeTaskId] ?? 0) + interval }));
-    }
-    setActiveTaskId(taskId);
-    setTimerStart(Date.now());
+  async function handleStartTask(taskId: string) {
+    await timer.startTimer(Number(taskId));
     setFocusMode(true);
   }
 
-  function stopTask() {
-    if (!activeTaskId || timerStart === null) return;
-    const interval = Math.floor((Date.now() - timerStart) / 1000);
-    const total    = (baseSeconds[activeTaskId] ?? 0) + interval;
-    if (total > 0) logSeconds(activeTaskId, total);
-    // Reset session for this task so next start is fresh
-    setBaseSeconds((p) => ({ ...p, [activeTaskId]: 0 }));
-    setActiveTaskId(null);
-    setTimerStart(null);
+  async function handleStopTask() {
+    await timer.stopTimer();
     setFocusMode(false);
   }
 
   // ── Accounts helpers ───────────────────────────────────────────────────────
 
-  function changeStatus(taskId: string, status: Task["status"]) {
+  async function changeStatus(taskId: string, status: Task["status"]) {
     setTaskList((p) => p.map((t) => t.id === taskId ? { ...t, status } : t));
   }
-  function reassign(taskId: string, assignee: string) {
+  async function reassign(taskId: string, assignee: string) {
     setTaskList((p) => p.map((t) => t.id === taskId ? { ...t, assignee } : t));
   }
   function changePriorityAcc(taskId: string, priority: Task["priority"]) {
@@ -285,10 +259,54 @@ export default function WorkerPage() {
     setNewTask(blankTask(clientName));
     setNewTaskClient(clientName);
   }
-  function createTask() {
+  async function createTask() {
     if (!newTask.title || !newTask.assignee) return;
-    setTaskList((p) => [{ ...newTask, id: `t${Date.now()}` }, ...p]);
+    const snapshot = { ...newTask };
+    const tempId = `t${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setTaskList((p) => [{ ...snapshot, id: tempId }, ...p]);
     setNewTaskClient(null);
+
+    try {
+      const { data: { session } } = await supabaseBrowser.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const staffRes = await supabaseBrowser.from("staff").select("accelo_id, firstname, surname");
+      const staff = (staffRes.data ?? []).find(
+        (s) => [s.firstname, s.surname].filter(Boolean).join(" ") === snapshot.assignee
+      );
+      if (!staff) throw new Error(`Could not resolve assignee: ${snapshot.assignee}`);
+
+      let companyAcceloId: number | undefined;
+      if (snapshot.client) {
+        const companyRes = await supabaseBrowser.from("companies").select("accelo_id, name");
+        const company = (companyRes.data ?? []).find((c) => c.name === snapshot.client);
+        if (!company) throw new Error(`Could not resolve client: ${snapshot.client}`);
+        companyAcceloId = company.accelo_id;
+      }
+
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          title: snapshot.title,
+          assignee_id: staff.accelo_id,
+          company_id: companyAcceloId,
+          status_id: 2,
+          due_date: snapshot.dueDate || undefined,
+          budgeted_seconds: snapshot.estimatedHours ? Math.round(snapshot.estimatedHours * 3600) : undefined,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const { task } = await res.json();
+      setTaskList((p) => p.map((t) => t.id === tempId ? { ...t, id: String(task.id) } : t));
+    } catch (err) {
+      console.error("Failed to create task:", err);
+      setTaskList((p) => p.filter((t) => t.id !== tempId));
+    }
   }
 
   // ── Derived data ───────────────────────────────────────────────────────────
@@ -296,22 +314,27 @@ export default function WorkerPage() {
   const workerActiveTasks = useMemo(
     () =>
       taskList
-        .filter((t) => t.assignee === selectedWorker && t.status !== "done" && !WAITING_IDS.has(t.id))
+        .filter((t) => t.assignee === selectedWorker && t.status !== "done" && t.status !== "waiting")
         .sort((a, b) => taskSortScore(a) - taskSortScore(b)),
     [taskList, selectedWorker]
   );
 
   const workerWaitingTasks = useMemo(
-    () => taskList.filter((t) => t.assignee === selectedWorker && WAITING_IDS.has(t.id)),
+    () => taskList.filter((t) => t.assignee === selectedWorker && t.status === "waiting"),
     [taskList, selectedWorker]
   );
 
   const activeTask = activeTaskId ? taskList.find((t) => t.id === activeTaskId) ?? null : null;
 
-  const myClients = useMemo(
-    () => clients.filter((c) => c.assignedTo.includes(selectedWorker)),
-    [selectedWorker]
-  );
+  const myClients = useMemo(() => {
+    const clientMap = new Map<string, { id: string; name: string; status: string }>();
+    for (const t of taskList) {
+      if (t.assignee === selectedWorker && t.client && !clientMap.has(t.client)) {
+        clientMap.set(t.client, { id: t.client.toLowerCase().replace(/\s+/g, "-"), name: t.client, status: "active" });
+      }
+    }
+    return [...clientMap.values()];
+  }, [taskList, selectedWorker]);
 
   return (
     <>
@@ -321,11 +344,12 @@ export default function WorkerPage() {
         elapsed={getElapsed(activeTask.id)}
         otherTasks={workerActiveTasks.filter((t) => t.id !== activeTask.id)}
         getElapsed={getElapsed}
-        onStop={stopTask}
+        onStop={handleStopTask}
         onExit={() => setFocusMode(false)}
-        onSwitch={startTask}
+        onSwitch={handleStartTask}
         infoRequested={infoRequested.has(activeTask.id)}
         onRequestInfo={setInfoTask}
+        isLoading={timer.isLoading}
       />
     )}
     <div className="space-y-8">
@@ -334,10 +358,10 @@ export default function WorkerPage() {
           {greeting},{" "}
           <select
             value={selectedWorker}
-            onChange={(e) => { if (activeTaskId) stopTask(); setSelectedWorker(e.target.value); }}
+            onChange={(e) => { if (activeTaskId) { setFocusMode(false); handleStopTask(); } setSelectedWorker(e.target.value); }}
             className="cursor-pointer appearance-none bg-transparent font-semibold underline decoration-dotted underline-offset-4 hover:decoration-solid focus:outline-none"
           >
-            {WORKERS.map((w) => <option key={w} value={w}>{w}</option>)}
+            {workers.map((w) => <option key={w} value={w}>{w}</option>)}
           </select>
         </h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
@@ -350,8 +374,9 @@ export default function WorkerPage() {
           tasks={workerActiveTasks}
           activeTaskId={activeTaskId}
           getElapsed={getElapsed}
-          onStart={startTask}
-          onStop={stopTask}
+          onStart={handleStartTask}
+          onStop={handleStopTask}
+          isLoading={timer.isLoading}
         />
         {workerWaitingTasks.length > 0 && <WaitingSection tasks={workerWaitingTasks} />}
       </div>
@@ -385,7 +410,7 @@ export default function WorkerPage() {
                       <span className="text-sm font-semibold flex-1">{client.name}</span>
                       {client.status === "at-risk" && (
                         <Badge variant="outline" className="font-normal text-xs bg-amber-50 text-amber-700 border-amber-200 gap-1 shrink-0">
-                          <AlertCircle className="size-3" /> At Risk
+                          At Risk
                         </Badge>
                       )}
                       <span className="text-xs text-muted-foreground shrink-0 w-10 text-right">{openTasks.length} open</span>
@@ -451,7 +476,7 @@ export default function WorkerPage() {
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuLabel className="text-xs text-muted-foreground">Assign to</DropdownMenuLabel>
                                   <DropdownMenuSeparator />
-                                  {WORKERS.map((w) => (
+                                  {workers.map((w) => (
                                     <DropdownMenuItem key={w} onClick={() => reassign(t.id, w)} className={t.assignee === w ? "font-semibold" : ""}>
                                       <Avatar className="size-5 mr-2"><AvatarFallback className="text-[9px] font-semibold bg-primary/10 text-primary">{w[0]}</AvatarFallback></Avatar>
                                       {w}
@@ -642,7 +667,7 @@ export default function WorkerPage() {
                 <label className="text-sm font-medium">Assign to *</label>
                 <select value={newTask.assignee} onChange={(e) => setNewTask((p) => ({ ...p, assignee: e.target.value }))} className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer">
                   <option value="">Select staff…</option>
-                  {WORKERS.map((w) => <option key={w}>{w}</option>)}
+                  {workers.map((w) => <option key={w}>{w}</option>)}
                 </select>
               </div>
               <div className="space-y-1.5">
@@ -694,6 +719,25 @@ export default function WorkerPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Short Time Entry Confirmation Dialog ─────────────────────────── */}
+      <Dialog open={!!timer.pendingConfirmation} onOpenChange={(open) => { if (!open) timer.confirmEntry(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="size-4 text-amber-500" />
+              Very Short Time Entry
+            </DialogTitle>
+            <DialogDescription>
+              This entry is only {timer.pendingConfirmation?.duration_seconds ?? 0} second{(timer.pendingConfirmation?.duration_seconds ?? 0) !== 1 ? "s" : ""}. Would you like to save it?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => timer.discardEntry()}>Discard</Button>
+            <Button onClick={() => timer.confirmEntry()}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
     </>
   );
@@ -710,7 +754,7 @@ const focusCategoryAccent: Record<string, string> = {
   "Cash Flow":       "#3b82f6", "Board Meeting": "#94a3b8",
 };
 
-function FocusMode({ task, elapsed, otherTasks, getElapsed, onStop, onExit, onSwitch, infoRequested, onRequestInfo }: {
+function FocusMode({ task, elapsed, otherTasks, getElapsed, onStop, onExit, onSwitch, infoRequested, onRequestInfo, isLoading }: {
   task: Task;
   elapsed: number;
   otherTasks: Task[];
@@ -720,6 +764,7 @@ function FocusMode({ task, elapsed, otherTasks, getElapsed, onStop, onExit, onSw
   onSwitch: (id: string) => void;
   infoRequested: boolean;
   onRequestInfo: (task: Task) => void;
+  isLoading?: boolean;
 }) {
   const liveLogged = task.loggedHours + elapsed / 3600;
   const progress   = task.estimatedHours > 0
@@ -804,11 +849,12 @@ function FocusMode({ task, elapsed, otherTasks, getElapsed, onStop, onExit, onSw
         <div className="flex items-center gap-3 mb-12">
           <button
             onClick={onStop}
-            className="flex items-center gap-2.5 rounded-full px-8 py-3.5 text-sm font-semibold transition-opacity hover:opacity-80 cursor-pointer"
+            disabled={isLoading}
+            className="flex items-center gap-2.5 rounded-full px-8 py-3.5 text-sm font-semibold transition-opacity hover:opacity-80 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: accent, color: "#0d1117" }}
           >
-            <Square className="size-4 fill-current" />
-            Stop & Log Time
+            {isLoading ? <RefreshCw className="size-4 animate-spin" /> : <Square className="size-4 fill-current" />}
+            {isLoading ? "Saving..." : "Stop & Log Time"}
           </button>
           <button
             onClick={() => onRequestInfo(task)}
@@ -972,12 +1018,13 @@ function FocusMode({ task, elapsed, otherTasks, getElapsed, onStop, onExit, onSw
 
 // ── Worker Feed ───────────────────────────────────────────────────────────────
 
-function WorkerFeedCard({ tasks, activeTaskId, getElapsed, onStart, onStop }: {
+function WorkerFeedCard({ tasks, activeTaskId, getElapsed, onStart, onStop, isLoading }: {
   tasks: Task[];
   activeTaskId: string | null;
   getElapsed: (id: string) => number;
   onStart: (id: string) => void;
   onStop: () => void;
+  isLoading?: boolean;
 }) {
   // First task auto-expanded so it acts like the old hero card
   const [expandedId, setExpandedId] = useState<string | null>(tasks[0]?.id ?? null);
@@ -1034,6 +1081,7 @@ function WorkerFeedCard({ tasks, activeTaskId, getElapsed, onStart, onStop }: {
               onToggleExpand={() => setExpandedId(expandedId === task.id ? null : task.id)}
               onStart={() => onStart(task.id)}
               onStop={onStop}
+              isLoading={isLoading}
             />
           ))}
         </div>
@@ -1057,7 +1105,7 @@ function WorkerFeedCard({ tasks, activeTaskId, getElapsed, onStart, onStop }: {
   );
 }
 
-function WorkerTaskRow({ task, isFirst, isActive, elapsed, expanded, onToggleExpand, onStart, onStop }: {
+function WorkerTaskRow({ task, isFirst, isActive, elapsed, expanded, onToggleExpand, onStart, onStop, isLoading }: {
   task: Task;
   isFirst: boolean;
   isActive: boolean;
@@ -1066,6 +1114,7 @@ function WorkerTaskRow({ task, isFirst, isActive, elapsed, expanded, onToggleExp
   onToggleExpand: () => void;
   onStart: () => void;
   onStop: () => void;
+  isLoading?: boolean;
 }) {
   const liveLogged = task.loggedHours + (isActive ? elapsed / 3600 : 0);
   const progress   = task.estimatedHours > 0
@@ -1118,16 +1167,19 @@ function WorkerTaskRow({ task, isFirst, isActive, elapsed, expanded, onToggleExp
         {/* Play / Stop button */}
         <button
           onClick={isActive ? onStop : onStart}
-          className={`size-7 rounded-full flex items-center justify-center transition-colors shrink-0 cursor-pointer ${
+          disabled={isLoading}
+          className={`size-7 rounded-full flex items-center justify-center transition-colors shrink-0 cursor-pointer disabled:opacity-50 ${
             isActive
               ? "bg-emerald-500 text-white hover:bg-emerald-600"
               : "bg-muted hover:bg-foreground hover:text-background"
           }`}
           title={isActive ? "Stop & log time" : "Start timer"}
         >
-          {isActive
-            ? <Square className="size-3 fill-current" />
-            : <Play className="size-3 fill-current ml-0.5" />
+          {isLoading && isActive
+            ? <RefreshCw className="size-3 animate-spin" />
+            : isActive
+              ? <Square className="size-3 fill-current" />
+              : <Play className="size-3 fill-current ml-0.5" />
           }
         </button>
 
