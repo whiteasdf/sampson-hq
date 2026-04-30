@@ -45,9 +45,9 @@ describe("timerToHours()", () => {
     expect(timerToHours(180)).toBe(0.1);
   });
 
-  it("rounds 179 s (just under 3 min) to 0 hours", () => {
-    // 179 / 360 ≈ 0.497 → Math.round → 0 → 0 h
-    expect(timerToHours(179)).toBe(0);
+  it("rounds 179 s (just under 3 min) up to 0.1 hours", () => {
+    // Math.ceil: any non-zero time rounds up to at least one 6-min increment
+    expect(timerToHours(179)).toBe(0.1);
   });
 
   it("rounds 360 s (6 min) to 0.1 hours", () => {

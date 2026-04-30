@@ -616,11 +616,10 @@ describe("pivot1a timer compatibility — rounded_seconds and timerToHours", () 
     expect(roundedSeconds).toBe(5400);
   });
 
-  it("timerToHours(179) rounds down to 0 — entry must not be persisted (180 s boundary)", () => {
-    // 179 / 360 = 0.497 → rounds to 0 increments → 0 hours → 0 seconds
-    // The API route should reject this before writing to time_entries
+  it("timerToHours(179) rounds up to 0.1 — any non-zero work bills as minimum increment", () => {
+    // Math.ceil(179 / 360) = 1 → 1 increment → 360 s → 0.1 h
     const hours = timerToHours(179);
-    expect(hours).toBe(0);
+    expect(hours).toBe(0.1);
   });
 
   it("timerToHours(180) rounds up to 360 — the minimum billable increment", () => {

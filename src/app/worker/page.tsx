@@ -6,6 +6,7 @@ import { serviceCategories, clientDocuments } from "@/lib/data";
 import type { ClientDocument } from "@/lib/data";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { getWorkerTasks, getStaffNames, getCompanyNames } from "@/lib/queries/tasks";
+import { useTimer } from "@/hooks/use-timer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -197,14 +198,9 @@ export default function WorkerPage() {
     }).catch(console.error);
   }, []);
 
-  // Timer
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [timerStart, setTimerStart]     = useState<number | null>(null);
-  // Accumulated seconds per task across multiple start/pause cycles this session
-  const [baseSeconds, setBaseSeconds]   = useState<Record<string, number>>({});
-  // Ticks every second to force a re-render while the timer is running
-  const [, setTick]                     = useState(0);
-  const [focusMode, setFocusMode]       = useState(false);
+  // Timer — powered by Supabase-backed hook
+  const timer = useTimer();
+  const [focusMode, setFocusMode] = useState(false);
 
   // Accounts section state
   const [infoRequested, setInfoRequested] = useState<Set<string>>(new Set());
@@ -220,48 +216,23 @@ export default function WorkerPage() {
     setGreeting(new Date().getHours() < 12 ? "Good morning" : "Good afternoon");
   }, []);
 
-  useEffect(() => {
-    if (!activeTaskId) return;
-    const id = setInterval(() => setTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [activeTaskId]);
+  // ── Timer actions (delegated to useTimer hook) ─────────────────────────────
 
-  // Live elapsed for any task: accumulated base + current interval (if active)
+  const activeTaskId = timer.activeEntry ? String(timer.activeEntry.task_id) : null;
+
   function getElapsed(taskId: string): number {
-    const base = baseSeconds[taskId] ?? 0;
-    if (taskId === activeTaskId && timerStart !== null) {
-      return base + Math.floor((Date.now() - timerStart) / 1000);
-    }
-    return base;
+    // Only the active task has a live elapsed counter.
+    if (taskId === activeTaskId) return timer.elapsed;
+    return 0;
   }
 
-  // ── Timer actions ──────────────────────────────────────────────────────────
-
-  function logSeconds(taskId: string, seconds: number) {
-    const hours = Math.round((seconds / 3600) * 100) / 100;
-    setTaskList((p) => p.map((t) => t.id === taskId ? { ...t, loggedHours: Math.round((t.loggedHours + hours) * 100) / 100 } : t));
-  }
-
-  function startTask(taskId: string) {
-    // Pause the currently running task — save interval into baseSeconds without logging
-    if (activeTaskId && timerStart !== null) {
-      const interval = Math.floor((Date.now() - timerStart) / 1000);
-      setBaseSeconds((p) => ({ ...p, [activeTaskId]: (p[activeTaskId] ?? 0) + interval }));
-    }
-    setActiveTaskId(taskId);
-    setTimerStart(Date.now());
+  async function handleStartTask(taskId: string) {
+    await timer.startTimer(Number(taskId));
     setFocusMode(true);
   }
 
-  function stopTask() {
-    if (!activeTaskId || timerStart === null) return;
-    const interval = Math.floor((Date.now() - timerStart) / 1000);
-    const total    = (baseSeconds[activeTaskId] ?? 0) + interval;
-    if (total > 0) logSeconds(activeTaskId, total);
-    // Reset session for this task so next start is fresh
-    setBaseSeconds((p) => ({ ...p, [activeTaskId]: 0 }));
-    setActiveTaskId(null);
-    setTimerStart(null);
+  async function handleStopTask() {
+    await timer.stopTimer();
     setFocusMode(false);
   }
 
@@ -326,11 +297,12 @@ export default function WorkerPage() {
         elapsed={getElapsed(activeTask.id)}
         otherTasks={workerActiveTasks.filter((t) => t.id !== activeTask.id)}
         getElapsed={getElapsed}
-        onStop={stopTask}
+        onStop={handleStopTask}
         onExit={() => setFocusMode(false)}
-        onSwitch={startTask}
+        onSwitch={handleStartTask}
         infoRequested={infoRequested.has(activeTask.id)}
         onRequestInfo={setInfoTask}
+        isLoading={timer.isLoading}
       />
     )}
     <div className="space-y-8">
@@ -339,7 +311,7 @@ export default function WorkerPage() {
           {greeting},{" "}
           <select
             value={selectedWorker}
-            onChange={(e) => { if (activeTaskId) stopTask(); setSelectedWorker(e.target.value); }}
+            onChange={(e) => { if (activeTaskId) { setFocusMode(false); handleStopTask(); } setSelectedWorker(e.target.value); }}
             className="cursor-pointer appearance-none bg-transparent font-semibold underline decoration-dotted underline-offset-4 hover:decoration-solid focus:outline-none"
           >
             {workers.map((w) => <option key={w} value={w}>{w}</option>)}
@@ -355,8 +327,9 @@ export default function WorkerPage() {
           tasks={workerActiveTasks}
           activeTaskId={activeTaskId}
           getElapsed={getElapsed}
-          onStart={startTask}
-          onStop={stopTask}
+          onStart={handleStartTask}
+          onStop={handleStopTask}
+          isLoading={timer.isLoading}
         />
         {workerWaitingTasks.length > 0 && <WaitingSection tasks={workerWaitingTasks} />}
       </div>
@@ -715,7 +688,7 @@ const focusCategoryAccent: Record<string, string> = {
   "Cash Flow":       "#3b82f6", "Board Meeting": "#94a3b8",
 };
 
-function FocusMode({ task, elapsed, otherTasks, getElapsed, onStop, onExit, onSwitch, infoRequested, onRequestInfo }: {
+function FocusMode({ task, elapsed, otherTasks, getElapsed, onStop, onExit, onSwitch, infoRequested, onRequestInfo, isLoading }: {
   task: Task;
   elapsed: number;
   otherTasks: Task[];
@@ -725,6 +698,7 @@ function FocusMode({ task, elapsed, otherTasks, getElapsed, onStop, onExit, onSw
   onSwitch: (id: string) => void;
   infoRequested: boolean;
   onRequestInfo: (task: Task) => void;
+  isLoading?: boolean;
 }) {
   const liveLogged = task.loggedHours + elapsed / 3600;
   const progress   = task.estimatedHours > 0
@@ -809,11 +783,12 @@ function FocusMode({ task, elapsed, otherTasks, getElapsed, onStop, onExit, onSw
         <div className="flex items-center gap-3 mb-12">
           <button
             onClick={onStop}
-            className="flex items-center gap-2.5 rounded-full px-8 py-3.5 text-sm font-semibold transition-opacity hover:opacity-80 cursor-pointer"
+            disabled={isLoading}
+            className="flex items-center gap-2.5 rounded-full px-8 py-3.5 text-sm font-semibold transition-opacity hover:opacity-80 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: accent, color: "#0d1117" }}
           >
-            <Square className="size-4 fill-current" />
-            Stop & Log Time
+            {isLoading ? <RefreshCw className="size-4 animate-spin" /> : <Square className="size-4 fill-current" />}
+            {isLoading ? "Saving..." : "Stop & Log Time"}
           </button>
           <button
             onClick={() => onRequestInfo(task)}
@@ -977,12 +952,13 @@ function FocusMode({ task, elapsed, otherTasks, getElapsed, onStop, onExit, onSw
 
 // ── Worker Feed ───────────────────────────────────────────────────────────────
 
-function WorkerFeedCard({ tasks, activeTaskId, getElapsed, onStart, onStop }: {
+function WorkerFeedCard({ tasks, activeTaskId, getElapsed, onStart, onStop, isLoading }: {
   tasks: Task[];
   activeTaskId: string | null;
   getElapsed: (id: string) => number;
   onStart: (id: string) => void;
   onStop: () => void;
+  isLoading?: boolean;
 }) {
   // First task auto-expanded so it acts like the old hero card
   const [expandedId, setExpandedId] = useState<string | null>(tasks[0]?.id ?? null);
@@ -1039,6 +1015,7 @@ function WorkerFeedCard({ tasks, activeTaskId, getElapsed, onStart, onStop }: {
               onToggleExpand={() => setExpandedId(expandedId === task.id ? null : task.id)}
               onStart={() => onStart(task.id)}
               onStop={onStop}
+              isLoading={isLoading}
             />
           ))}
         </div>
@@ -1062,7 +1039,7 @@ function WorkerFeedCard({ tasks, activeTaskId, getElapsed, onStart, onStop }: {
   );
 }
 
-function WorkerTaskRow({ task, isFirst, isActive, elapsed, expanded, onToggleExpand, onStart, onStop }: {
+function WorkerTaskRow({ task, isFirst, isActive, elapsed, expanded, onToggleExpand, onStart, onStop, isLoading }: {
   task: Task;
   isFirst: boolean;
   isActive: boolean;
@@ -1071,6 +1048,7 @@ function WorkerTaskRow({ task, isFirst, isActive, elapsed, expanded, onToggleExp
   onToggleExpand: () => void;
   onStart: () => void;
   onStop: () => void;
+  isLoading?: boolean;
 }) {
   const liveLogged = task.loggedHours + (isActive ? elapsed / 3600 : 0);
   const progress   = task.estimatedHours > 0
@@ -1123,16 +1101,19 @@ function WorkerTaskRow({ task, isFirst, isActive, elapsed, expanded, onToggleExp
         {/* Play / Stop button */}
         <button
           onClick={isActive ? onStop : onStart}
-          className={`size-7 rounded-full flex items-center justify-center transition-colors shrink-0 cursor-pointer ${
+          disabled={isLoading}
+          className={`size-7 rounded-full flex items-center justify-center transition-colors shrink-0 cursor-pointer disabled:opacity-50 ${
             isActive
               ? "bg-emerald-500 text-white hover:bg-emerald-600"
               : "bg-muted hover:bg-foreground hover:text-background"
           }`}
           title={isActive ? "Stop & log time" : "Start timer"}
         >
-          {isActive
-            ? <Square className="size-3 fill-current" />
-            : <Play className="size-3 fill-current ml-0.5" />
+          {isLoading && isActive
+            ? <RefreshCw className="size-3 animate-spin" />
+            : isActive
+              ? <Square className="size-3 fill-current" />
+              : <Play className="size-3 fill-current ml-0.5" />
           }
         </button>
 

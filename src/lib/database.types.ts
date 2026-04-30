@@ -63,7 +63,7 @@ export type Database = {
           staff_accelo_id: number
           task_id: number
           started_at: string
-          stopped_at: string
+          stopped_at: string | null
           duration_seconds: number
           rounded_seconds: number
           billable: boolean
@@ -78,9 +78,9 @@ export type Database = {
           staff_accelo_id: number
           task_id: number
           started_at: string
-          stopped_at: string
-          duration_seconds: number
-          rounded_seconds: number
+          stopped_at?: string | null
+          duration_seconds?: number
+          rounded_seconds?: number
           billable?: boolean
           rate_id?: number | null
           description?: string | null
@@ -93,7 +93,7 @@ export type Database = {
           staff_accelo_id?: number
           task_id?: number
           started_at?: string
-          stopped_at?: string
+          stopped_at?: string | null
           duration_seconds?: number
           rounded_seconds?: number
           billable?: boolean

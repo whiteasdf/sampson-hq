@@ -74,7 +74,7 @@ export function liveElapsed(entry: TimerEntry): number {
  * 360 seconds = 0.1 hours (industry standard for accounting).
  */
 export function timerToHours(elapsedSeconds: number): number {
-  const rounded = Math.round(elapsedSeconds / 360) * 360;
+  const rounded = Math.ceil(elapsedSeconds / 360) * 360;
   return rounded / 3600;
 }
 

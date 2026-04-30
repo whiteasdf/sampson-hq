@@ -8,6 +8,7 @@
     { "path": "/api/cron/sync-staff",        "schedule": "0 * * * *"    },
     { "path": "/api/cron/compute-analytics", "schedule": "0 * * * *"    },
     { "path": "/api/cron/recurring-tasks",   "schedule": "0 11 * * *"   },
-    { "path": "/api/cron/reconcile",         "schedule": "0 7 * * *"    }
+    { "path": "/api/cron/reconcile",         "schedule": "0 7 * * *"    },
+    { "path": "/api/cron/push-time-entries", "schedule": "*/5 * * * *"  }
   ]
 }
